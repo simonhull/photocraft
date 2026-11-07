@@ -31,10 +31,15 @@
 //!   and PhotoCraft pastes its own copy, layers and all. Copies go out as images.
 //! - **Native controls** map to PhotoCraft's own commands, exactly as its menu items run them.
 //! - **Panels** see the active document and its layers, top first.
+//! - **Native panels** (`native`): the Layers inspector and the brush popover, described with
+//!   craft-mobile's `ui` kit and drawn by the shell; their edits run PhotoCraft's commands, one
+//!   undo step per drag.
 //! - **Power:** while the device is hot or saving power, live previews run on a reduced copy
 //!   (Preferences › Performance › Low Resolution Previews), whatever the preference says.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
+
+mod native;
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -319,6 +324,18 @@ impl CraftApp for PhotoCraftMobile {
             items_title: "Layers".into(),
             items,
         }
+    }
+
+    fn panels(&self) -> Vec<craft_mobile::ui::PanelInfo> {
+        native::panels()
+    }
+
+    fn describe(&self, panel: &craft_mobile::ui::PanelId) -> Option<craft_mobile::ui::Panel> {
+        native::describe(&self.app, panel)
+    }
+
+    fn apply(&mut self, ctx: &egui::Context, edit: &craft_mobile::ui::Edit) -> Result<(), String> {
+        native::apply(&mut self.app, ctx, edit)
     }
 
     /// Start writing crash-recovery copies of every unsaved document, and return: they write on

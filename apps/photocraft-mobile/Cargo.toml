@@ -35,6 +35,7 @@ heif = ["photocraft-codecs/heif"]
 # The shared native-shell host (craft-libs `crates/mobile`).
 craft-mobile = { workspace = true }
 serde_json = { workspace = true }
+photocraft-color = { workspace = true }
 photocraft-engine = { workspace = true }
 photocraft-io = { workspace = true }
 photocraft-codecs = { workspace = true }

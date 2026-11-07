@@ -5575,6 +5575,7 @@ dependencies = [
  "egui",
  "log",
  "photocraft-codecs",
+ "photocraft-color",
  "photocraft-doc",
  "photocraft-engine",
  "photocraft-format",
