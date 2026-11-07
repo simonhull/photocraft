@@ -62,7 +62,7 @@ pub(crate) fn toolbar_position(tool: Tool) -> usize {
 /// slot keeps only its visible tools, so its flyout lists just those; a slot with none left is
 /// dropped, and so is a section with no slots. Each slot carries its index in `TOOL_SECTIONS`,
 /// so its remembered tool and flyout stay put when other slots are hidden.
-pub fn visible_sections(hidden: &[String]) -> Vec<Vec<(usize, Vec<Tool>)>> {
+pub(super) fn visible_sections(hidden: &[String]) -> Vec<Vec<(usize, Vec<Tool>)>> {
     let hidden: Vec<Tool> = hidden.iter().map(String::as_str).filter_map(Tool::from_name).collect();
     let mut index = 0usize;
     let mut sections = Vec::new();
@@ -80,6 +80,25 @@ pub fn visible_sections(hidden: &[String]) -> Vec<Vec<(usize, Vec<Tool>)>> {
         }
     }
     sections
+}
+
+/// One slot of the toolbar as it shows: its tools, the shown one's flyout, top first.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ToolbarSlot {
+    tools: Vec<Tool>,
+}
+
+impl ToolbarSlot {
+    /// Its tools, never empty.
+    pub fn tools(&self) -> &[Tool] {
+        &self.tools
+    }
+}
+
+/// The toolbar's slots top to bottom, as it shows them: Edit › Toolbar's hidden tools (`hidden`,
+/// tool names) left out, and a slot with none left dropped. For a host that draws its own toolbar.
+pub fn toolbar_slots(hidden: &[String]) -> Vec<ToolbarSlot> {
+    visible_sections(hidden).into_iter().flatten().map(|(_, tools)| ToolbarSlot { tools }).collect()
 }
 
 /// A primary-button gesture started on this tool; open only after it leaves its hit area.

@@ -6,9 +6,8 @@
 //! Options (`window.toggle.options`), which shows PhotoCraft's options bar as a floating card.
 
 use craft_mobile::ui::{self, Edit, EditValue, Icon, Node, Panel, PanelRole, Phase, Shortcut, ToolPalette, ToolSlot};
-use photocraft_ui_egui::panels::visible_sections;
+use photocraft_ui_egui::panels::toolbar_slots;
 use photocraft_ui_egui::{PhotocraftApp, Tool, tool_shortcuts};
-use serde_json::json;
 
 /// The palette's control id.
 const PALETTE: &str = "palette";
@@ -20,12 +19,11 @@ const SELECT: &str = "tools.select.";
 pub(super) fn describe(app: &PhotocraftApp) -> Option<Panel> {
     let current = app.ui.tool;
     let mut shown = false;
-    let mut slots: Vec<ToolSlot> = visible_sections(&app.session.prefs().toolbar.hidden)
-        .into_iter()
-        .flatten()
-        .map(|(_, tools)| {
-            shown |= tools.contains(&current);
-            ToolSlot::new(tools.into_iter().map(|t| tool(app, t)).collect())
+    let mut slots: Vec<ToolSlot> = toolbar_slots(&app.session.prefs().toolbar.hidden)
+        .iter()
+        .map(|slot| {
+            shown |= slot.tools().contains(&current);
+            ToolSlot::new(slot.tools().iter().map(|&t| tool(app, t)).collect())
         })
         .collect();
     if !shown {
@@ -45,7 +43,7 @@ pub(super) fn apply(app: &mut PhotocraftApp, ctx: &egui::Context, edit: &Edit) -
     match (edit.phase, &edit.value, edit.control.as_str()) {
         (Phase::Commit, EditValue::Choice(picked), PALETTE) => {
             let tool = tool_shortcuts::tool(&format!("{SELECT}{picked}")).ok_or_else(|| format!("tools: no tool `{picked}`"))?;
-            photocraft_ui_egui::menus::invoke(app, ctx, &tool_shortcuts::id(tool), json!({})).map(drop)
+            tool_shortcuts::select(app, ctx, tool)
         }
         (_, value, control) => Err(format!("tools: `{control}` doesn't take {value:?}")),
     }
@@ -157,7 +155,7 @@ mod tests {
     use craft_mobile::ui::GestureId;
     use photocraft_engine::Session;
     use photocraft_ui_egui::Services;
-    use serde_json::Value;
+    use serde_json::{Value, json};
 
     fn app() -> PhotocraftApp {
         PhotocraftApp::new(Session::new(), Services::default())
@@ -188,10 +186,10 @@ mod tests {
     fn the_rail_describes_every_visible_tool() {
         let app = app();
         let palette = palette(&app);
-        let sections = visible_sections(&[]);
-        let expected: Vec<String> = sections.iter().flatten().flat_map(|(_, tools)| tools).map(|t| id(*t)).collect();
+        let slots = toolbar_slots(&[]);
+        let expected: Vec<String> = slots.iter().flat_map(|slot| slot.tools()).map(|t| id(*t)).collect();
         assert_eq!(ids(&palette), expected);
-        assert_eq!(palette["slots"].as_array().unwrap().len(), sections.iter().map(Vec::len).sum::<usize>());
+        assert_eq!(palette["slots"].as_array().unwrap().len(), slots.len());
         assert_eq!(palette["selected"], json!(id(app.ui.tool)));
         let brush = palette["slots"].as_array().unwrap().iter().flat_map(|s| s["tools"].as_array().unwrap()).find(|t| t["id"] == "brush").unwrap();
         assert_eq!(brush["label"], "Brush Tool");

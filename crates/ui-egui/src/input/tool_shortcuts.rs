@@ -12,6 +12,15 @@ pub fn id(tool: Tool) -> String {
     format!("tools.select.{name}")
 }
 
+/// Selects `tool` as its [`id`] command does from a menu or a key (the same rules, modal dialogs
+/// included), for a host's own tool picker.
+///
+/// # Errors
+/// The command's refusal, as a message.
+pub fn select(app: &mut PhotocraftApp, ctx: &egui::Context, tool: Tool) -> Result<(), String> {
+    crate::menus::invoke(app, ctx, &id(tool), serde_json::json!({})).map(drop)
+}
+
 /// The tool a [`id`] command selects.
 pub fn tool(id: &str) -> Option<Tool> {
     let name = id.strip_prefix("tools.select.")?;
@@ -36,6 +45,18 @@ pub(crate) fn uses_default(app: &PhotocraftApp, tool: Tool) -> bool {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// `select` picks a tool as its `tools.select.*` command does; a tool that can't be picked
+    /// now (no document) is refused the same way.
+    #[test]
+    fn select_picks_a_tool_as_its_command_does() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        let ctx = egui::Context::default();
+        select(&mut app, &ctx, Tool::Lasso).unwrap();
+        assert_eq!(app.ui.tool, Tool::Lasso);
+        select(&mut app, &ctx, Tool::Brush).unwrap();
+        assert_eq!(app.ui.tool, Tool::Brush);
+    }
 
     #[test]
     fn every_toolbar_tool_has_a_unique_live_shortcut_row() {

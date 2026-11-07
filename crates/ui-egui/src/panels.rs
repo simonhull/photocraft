@@ -117,8 +117,10 @@ pub use status_bar::{status_bar, status_bar_heights};
 use title_bar::title_x;
 pub use title_bar::{sync_window_title, system_title_bar, title_bar, window_title};
 #[cfg(test)]
-use toolbar::{STUDIO_CHIP, TOOL_SECTIONS, chips_height, color_chips, next_slot_tool, tool_flyout_drag_open, tool_flyout_release, toolbar_icon_size};
-pub use toolbar::{paint_toolbar_flyout_indicator, toolbar, visible_sections};
+use toolbar::{
+    STUDIO_CHIP, TOOL_SECTIONS, chips_height, color_chips, next_slot_tool, tool_flyout_drag_open, tool_flyout_release, toolbar_icon_size, visible_sections,
+};
+pub use toolbar::{ToolbarSlot, paint_toolbar_flyout_indicator, toolbar, toolbar_slots};
 
 fn c32(c: [f32; 4]) -> Color32 {
     Color32::from_rgba_unmultiplied((c[0] * 255.0) as u8, (c[1] * 255.0) as u8, (c[2] * 255.0) as u8, (c[3] * 255.0) as u8)
@@ -1353,6 +1355,16 @@ mod toolbar_hidden_tests {
         assert_eq!(visible_sections(&[]).iter().map(Vec::len).sum::<usize>(), TOOL_SECTIONS.iter().map(|section| section.len()).sum::<usize>());
         let by_command = visible_sections(&["sponge".to_string(), "move".to_string(), "artboard".to_string()]);
         assert_eq!(by_command, sections, "edit.toolbar names are read like `ui.set {{tool}}` names");
+    }
+
+    /// A host's view of the toolbar: its slots as shown, top to bottom, each with its tools.
+    #[test]
+    fn toolbar_slots_are_the_visible_slots_in_order() {
+        let hidden = ["Sponge".to_string(), "Move".to_string(), "Artboard".to_string()];
+        let slots: Vec<Vec<Tool>> = toolbar_slots(&hidden).iter().map(|slot| slot.tools().to_vec()).collect();
+        let sections: Vec<Vec<Tool>> = visible_sections(&hidden).into_iter().flatten().map(|(_, tools)| tools).collect();
+        assert_eq!(slots, sections);
+        assert!(slots.contains(&vec![Tool::Dodge, Tool::Burn]));
     }
 }
 
