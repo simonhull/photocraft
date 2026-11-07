@@ -27,6 +27,9 @@ targets:
         buildPhase: resources
       - path: ${CRAFT_MOBILE_DIR}/swift/CraftKit/Sources
         group: CraftKit
+      # The native panels' views (Layers, Brush), compiled in as source like CraftKit.
+      - path: ${CRAFT_MOBILE_DIR}/swift/CraftUI/Sources/CraftUI
+        group: CraftUI
     settings:
       base:
         # The hand-written Info.plist, used as is: XcodeGen's `info:` would regenerate it and drop

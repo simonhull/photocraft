@@ -1,13 +1,14 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// PhotoCraft for iPad. CraftKit provides the window: the canvas, Liquid Glass toolbar, layers
-/// inspector, the system document picker, exporter and share sheet, and Import from Photos.
+/// PhotoCraft for iPad. CraftKit provides the window: the canvas, Liquid Glass toolbar, the
+/// system document picker, exporter and share sheet, and Import from Photos. The Layers inspector
+/// and the brush popover are PhotoCraft's native panels (CraftUI), described by the Rust app.
 @main
 struct PhotoCraftApp: App {
     var body: some Scene {
         WindowGroup {
-            CraftShell(documentTypes: PhotoCraftApp.documentTypes, pencil: PhotoCraftApp.pencil)
+            CraftShell(documentTypes: PhotoCraftApp.documentTypes, pencil: PhotoCraftApp.pencil, nativePanels: true)
         }
     }
 

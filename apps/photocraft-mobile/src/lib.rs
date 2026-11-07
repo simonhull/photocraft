@@ -449,6 +449,9 @@ impl eframe::App for PhotoCraftMobile {
     }
 
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        if NATIVE_PANELS {
+            hide_native_panels(&mut self.app);
+        }
         // As files from disk: decoded on a worker, then File › Save writes back to them.
         for (path, bytes) in self.located.take() {
             if let Err(e) = self.app.open_file(&path, &bytes) {
@@ -471,11 +474,25 @@ impl eframe::App for PhotoCraftMobile {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        // Window › Layers may have turned it on since `logic`: not even for a frame.
+        if NATIVE_PANELS {
+            hide_native_panels(&mut self.app);
+        }
         self.app.ui(ui, frame);
         self.note_writes();
         show_file_names(&mut self.app.ui.status);
         quiet_clipboard(&mut self.app);
     }
+}
+
+/// Whether the shell draws the native panels: CraftKit's does on iPadOS (`nativePanels: true`);
+/// the Compose shell doesn't draw them yet, so on Android PhotoCraft's own Layers panel stays.
+const NATIVE_PANELS: bool = cfg!(target_os = "ios");
+
+/// Panels the native shell draws: PhotoCraft's own egui versions stay hidden (Window › Layers
+/// included), so nothing shows twice.
+fn hide_native_panels(app: &mut PhotocraftApp) {
+    app.ui.panels.layers = false;
 }
 
 /// The status bar names a document by its file, never by the path the shell writes it through.
@@ -1066,6 +1083,16 @@ mod tests {
         assert_eq!(share_name(&layered, Some(&path)), "a.psd", "a PNG can't keep its layers");
         assert_eq!(share_name(&layered, Some("/x/c.pdn")), "c.pcraft");
         assert_eq!(share_name(&Document::new("Untitled-1", Size::new(1, 1), ColorMode::Rgb, SampleType::U8), None), "Untitled-1.psd", "never saved");
+    }
+
+    /// The native Layers inspector replaces PhotoCraft's own panel: Window › Layers can't bring
+    /// it back on top.
+    #[test]
+    fn the_native_layers_inspector_replaces_the_egui_panel() {
+        let mut app = PhotocraftApp::new(Session::new(), Services::default());
+        app.ui.panels.layers = true;
+        hide_native_panels(&mut app);
+        assert!(!app.ui.panels.layers);
     }
 
     /// The panel lists layers top first, children under their group, as the desktop panel does.
