@@ -623,7 +623,27 @@ pub fn photocraft_layout(items: &[MenuItem], lang: Lang, language: &str) -> Layo
     layout
 }
 
+/// PhotoCraft's menus as the in-window bar has them, in the UI language: no app menu, no system
+/// items, the keys as PhotoCraft binds them. For a platform whose menu bar has no app menu (an
+/// iPad's), where About and Preferences stay where PhotoCraft puts them.
+pub fn plain_layout(items: &[MenuItem], lang: Lang) -> MenuBar {
+    let mut bar = from_items(&crate::menus::TOP_MENUS, items);
+    translate(&mut bar, lang);
+    bar
+}
+
 // ----------------------------------------------------------------------------- the app's side
+
+/// How a [`Backend`]'s platform lays out a menu bar.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MenuStyle {
+    /// A Mac app's ([`photocraft_layout`]): an app menu, the system's Window items, the system's
+    /// keys resolved.
+    #[default]
+    Mac,
+    /// As the in-window bar has them ([`plain_layout`]).
+    Plain,
+}
 
 /// What the native menu reports.
 #[derive(Clone, Debug, PartialEq)]
@@ -642,6 +662,10 @@ pub trait Backend {
     /// Events since the last call. Platform items (Hide, Services, Zoom, …) are handled by the
     /// backend and not reported.
     fn drain(&mut self) -> Vec<Event>;
+    /// How the menus are laid out for this platform: a Mac app's unless it says otherwise.
+    fn style(&self) -> MenuStyle {
+        MenuStyle::Mac
+    }
 }
 
 /// The native menu bar, while PhotoCraft uses one (the in-window menus are hidden then).
@@ -716,12 +740,16 @@ pub fn sync(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if menu.state == Some(state) && !menu.dirty {
         return;
     }
+    let style = menu.backend.style();
     let lang = crate::i18n::current();
     let mut items = crate::menus::menu_items(app);
     for it in &mut items {
         it.enabled &= crate::menus::modal_allows(app, &it.id);
     }
-    let layout = photocraft_layout(&items, lang, &app.session.prefs().interface.language);
+    let layout = match style {
+        MenuStyle::Mac => photocraft_layout(&items, lang, &app.session.prefs().interface.language),
+        MenuStyle::Plain => Layout { bar: plain_layout(&items, lang), clashes: Vec::new() },
+    };
     let Some(menu) = app.services.native_menu.as_mut() else { return };
     if !menu.logged {
         for c in &layout.clashes {

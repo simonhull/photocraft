@@ -222,6 +222,53 @@ impl Backend for Fake {
     }
 }
 
+/// A platform without an app menu (an iPad's).
+struct Plain(std::rc::Rc<std::cell::RefCell<Vec<MenuBar>>>);
+
+impl Backend for Plain {
+    fn sync(&mut self, bar: &MenuBar) {
+        self.0.borrow_mut().push(bar.clone());
+    }
+    fn drain(&mut self) -> Vec<Event> {
+        Vec::new()
+    }
+    fn style(&self) -> MenuStyle {
+        MenuStyle::Plain
+    }
+}
+
+/// A backend without an app menu gets the menus as the in-window bar has them: File first, About
+/// and Preferences where PhotoCraft puts them, no system items, PhotoCraft's own keys.
+#[test]
+fn a_plain_backend_gets_the_in_window_menus() {
+    let synced = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let mut app = app(true);
+    app.services.native_menu = Some(NativeMenu::new(Box::new(Plain(synced.clone()))));
+    frame(&egui::Context::default(), egui::RawInput::default(), |ui| sync(&mut app, ui.ctx()));
+    let bar = synced.borrow().last().cloned().unwrap();
+    let titles: Vec<&str> = bar.menus.iter().map(|m| m.title.as_str()).collect();
+    assert_eq!(titles, crate::menus::TOP_MENUS);
+    assert!(bar.menus.iter().all(|m| m.role == MenuRole::Normal));
+    let help = bar.menus.iter().find(|m| m.title == "Help").unwrap();
+    assert!(ids(&help.children).contains(&"help.about".to_string()), "About stays in Help");
+    assert!(bar.find(HIDE).is_none() && bar.find(MINIMIZE).is_none());
+    let mut standard = false;
+    fn walk(nodes: &[Node], standard: &mut bool) {
+        for n in nodes {
+            match n {
+                Node::Standard(_) => *standard = true,
+                Node::Submenu { children, .. } => walk(children, standard),
+                _ => {}
+            }
+        }
+    }
+    for m in &bar.menus {
+        walk(&m.children, &mut standard);
+    }
+    assert!(!standard, "no system items");
+    assert_eq!(bar.find("edit.undo").and_then(|it| it.shortcut.clone()).as_deref(), Some("Cmd+Z"));
+}
+
 /// A key equivalent reaches PhotoCraft's own key handling as the key press it was, so the
 /// shortcut runs once, through the same rules as without a native menu.
 #[test]
