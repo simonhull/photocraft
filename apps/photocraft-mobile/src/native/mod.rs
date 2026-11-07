@@ -9,12 +9,14 @@
 //! [`menus::invoke`]: photocraft_ui_egui::menus::invoke
 
 mod brush;
+mod documents;
 mod layers;
+pub(crate) mod menu;
+mod rail;
+pub(crate) mod status;
 
-use std::cell::Cell;
-
-use craft_mobile::ui::{Edit, Panel, PanelId, PanelInfo, PanelRole};
-use photocraft_ui_egui::PhotocraftApp;
+use craft_mobile::ui::{Edit, Feature, Panel, PanelId, PanelInfo, PanelRole, ShellFeatures};
+use photocraft_ui_egui::{Drawn, HostChrome, PhotocraftApp};
 use serde_json::Value;
 
 pub(crate) use layers::Drags;
@@ -23,13 +25,40 @@ pub(crate) use layers::Drags;
 const LAYERS: &str = "layers";
 /// The brush popover's id.
 const BRUSH: &str = "brush";
+/// The Documents inspector's id.
+const DOCUMENTS: &str = "documents";
+/// The tool rail's id.
+const TOOLS: &str = "tools";
 
-/// The panels PhotoCraft offers the native shell.
-pub(crate) fn panels() -> Vec<PanelInfo> {
-    vec![
-        PanelInfo { id: LAYERS.into(), title: "Layers".into(), icon: "square.3.layers.3d".into(), role: PanelRole::Inspector },
-        PanelInfo { id: BRUSH.into(), title: "Brush".into(), icon: "paintbrush.pointed".into(), role: PanelRole::Tool },
-    ]
+/// PhotoCraft's own panels the shell draws natively, as (`panel_docking::PANELS` id, native panel
+/// id). The brush popover replaces none of them: it is the brush's settings, not the Brushes
+/// panel's presets.
+const NATIVE_PANELS: [(&str, &str); 1] = [("layers", LAYERS)];
+
+/// The native panel that stands for PhotoCraft's panel `id`, if any: for
+/// [`craft_mobile::Platform::open_panel`] when Window › Layers asks for it.
+pub(crate) fn native_panel(id: &str) -> Option<&'static str> {
+    NATIVE_PANELS.iter().find(|(own, _)| *own == id).map(|(_, native)| *native)
+}
+
+/// The parts of PhotoCraft's chrome a shell drawing `features` takes over; `None` for a shell
+/// that draws none of it. The rail stands for the toolbar and the options bar (its tools' options
+/// open from it); the panels for the dock and the document tabs (the Documents inspector).
+pub(crate) fn host_chrome(features: ShellFeatures) -> Option<HostChrome> {
+    if features.is_empty() {
+        return None;
+    }
+    let drawn = |feature| if features.contains(feature) { Drawn::ByHost } else { Drawn::ByPhotoCraft };
+    let panels = drawn(Feature::Panels);
+    Some(HostChrome {
+        menus: drawn(Feature::Menus),
+        toolbar: drawn(Feature::Rail),
+        options_bar: drawn(Feature::Rail),
+        status_bar: drawn(Feature::Status),
+        tabs: panels,
+        dock: panels,
+        native_panels: if panels == Drawn::ByHost { NATIVE_PANELS.iter().map(|(own, _)| (*own).to_owned()).collect() } else { Vec::new() },
+    })
 }
 
 /// The native panels' state between frames.
@@ -37,23 +66,45 @@ pub(crate) fn panels() -> Vec<PanelInfo> {
 pub(crate) struct Native {
     /// The Layers inspector's drags in progress.
     drags: Drags,
-    /// The shell has shown the Layers inspector: it draws native panels, so PhotoCraft's own
-    /// Layers panel would show the same thing twice. (A shell describes only the panels it opened.)
-    layers_shown: Cell<bool>,
-    /// PhotoCraft's own Layers panel has been hidden since: it showing again is the user asking.
-    layers_hidden: Cell<bool>,
+    /// What the shell draws: the Documents inspector and the rail are offered only to a shell that
+    /// draws the panels and the rail.
+    features: ShellFeatures,
 }
 
 impl Native {
+    /// The shell draws `features`.
+    pub(crate) fn shell(&mut self, features: ShellFeatures) {
+        self.features = features;
+    }
+
+    /// Whether the shell draws `feature`.
+    pub(crate) fn draws(&self, feature: Feature) -> bool {
+        self.features.contains(feature)
+    }
+
+    /// The panels PhotoCraft offers the shell.
+    pub(crate) fn panels(&self) -> Vec<PanelInfo> {
+        let mut panels = vec![
+            PanelInfo { id: LAYERS.into(), title: "Layers".into(), icon: "square.3.layers.3d".into(), role: PanelRole::Inspector },
+            PanelInfo { id: BRUSH.into(), title: "Brush".into(), icon: "paintbrush.pointed".into(), role: PanelRole::Tool },
+        ];
+        if self.features.contains(Feature::Panels) {
+            panels.push(PanelInfo { id: DOCUMENTS.into(), title: "Documents".into(), icon: "doc.on.doc".into(), role: PanelRole::Inspector });
+        }
+        if self.features.contains(Feature::Rail) {
+            panels.push(PanelInfo { id: TOOLS.into(), title: "Tools".into(), icon: "hammer".into(), role: PanelRole::Rail });
+        }
+        panels
+    }
+
     /// One panel, described from the app as it is now; `None` for a panel PhotoCraft doesn't
     /// offer (or Layers without a document).
     pub(crate) fn describe(&self, app: &PhotocraftApp, id: &PanelId) -> Option<Panel> {
         match id.as_str() {
-            LAYERS => {
-                self.layers_shown.set(true);
-                layers::describe(app)
-            }
+            LAYERS => layers::describe(app),
             BRUSH => Some(brush::describe(app)),
+            DOCUMENTS => Some(documents::describe(app)),
+            TOOLS => rail::describe(app),
             _ => None,
         }
     }
@@ -63,21 +114,10 @@ impl Native {
         match edit.panel.as_str() {
             LAYERS => layers::apply(app, &mut self.drags, ctx, edit),
             BRUSH => brush::apply(app, ctx, edit),
+            DOCUMENTS => documents::apply(app, ctx, edit),
+            TOOLS => rail::apply(app, ctx, edit),
             other => Err(format!("no native panel `{other}`")),
         }
-    }
-
-    /// Hide PhotoCraft's own panels the shell draws natively, once the shell has shown that it
-    /// does. Asking for one since (Window › Layers, the rail's Layers icon) gives the id of the
-    /// native panel to open instead: for [`craft_mobile::Platform::open_panel`].
-    pub(crate) fn hide_replaced_panels(&self, app: &mut PhotocraftApp) -> Option<&'static str> {
-        if !self.layers_shown.get() {
-            return None;
-        }
-        // Shown before the native inspector took over (the workspace's panel) isn't asked for.
-        let asked = app.ui.panels.layers && self.layers_hidden.replace(true);
-        app.ui.panels.layers = false;
-        asked.then_some(LAYERS)
     }
 }
 
@@ -112,10 +152,17 @@ mod tests {
         PhotocraftApp::new(session, Services::default())
     }
 
+    fn every_feature() -> ShellFeatures {
+        ShellFeatures::from(Feature::ALL)
+    }
+
     #[test]
     fn every_offered_panel_is_described_and_well_formed() {
-        let (app, native) = (app(), Native::default());
-        for info in panels() {
+        let (app, mut native) = (app(), Native::default());
+        native.shell(every_feature());
+        let offered = native.panels();
+        assert_eq!(offered.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), [LAYERS, BRUSH, DOCUMENTS, TOOLS]);
+        for info in offered {
             let panel = native.describe(&app, &info.id).unwrap();
             assert_eq!(panel.id(), &info.id);
             panel.check().unwrap();
@@ -123,32 +170,49 @@ mod tests {
         assert!(native.describe(&app, &"timeline".into()).is_none());
     }
 
-    /// PhotoCraft's own Layers panel stays until the shell shows the native one (the Compose
-    /// shell doesn't draw native panels yet), and then for good.
+    /// A shell that draws neither the panels nor the rail (the Compose shell, for now) isn't
+    /// offered the Documents inspector or the rail: PhotoCraft's tabs and toolbar are on screen.
     #[test]
-    fn the_egui_layers_panel_goes_once_the_shell_shows_the_native_one() {
-        let (mut app, native) = (app(), Native::default());
-        app.ui.panels.layers = true;
-        native.describe(&app, &BRUSH.into());
-        assert_eq!(native.hide_replaced_panels(&mut app), None);
-        assert!(app.ui.panels.layers, "the brush popover alone replaces nothing");
-        native.describe(&app, &LAYERS.into());
-        assert_eq!(native.hide_replaced_panels(&mut app), None, "the inspector is open already");
-        assert!(!app.ui.panels.layers);
-        assert_eq!(native.hide_replaced_panels(&mut app), None);
+    fn documents_and_the_rail_are_for_a_shell_that_draws_them() {
+        let native = Native::default();
+        assert_eq!(native.panels().iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), [LAYERS, BRUSH]);
     }
 
-    /// Window › Layers or the rail's Layers icon, once the native inspector replaces the panel:
-    /// the shell is asked to open the inspector, once, and the egui panel stays hidden.
     #[test]
-    fn asking_for_the_egui_layers_panel_opens_the_native_one() {
-        let (mut app, native) = (app(), Native::default());
-        native.describe(&app, &LAYERS.into());
-        native.hide_replaced_panels(&mut app);
-        app.ui.panels.layers = true;
-        assert_eq!(native.hide_replaced_panels(&mut app), Some(LAYERS));
-        assert!(!app.ui.panels.layers);
-        assert_eq!(native.hide_replaced_panels(&mut app), None, "one request per ask");
+    fn a_shell_with_every_feature_takes_over_all_the_chrome() {
+        let chrome = host_chrome(every_feature()).unwrap();
+        assert_eq!(
+            chrome,
+            HostChrome {
+                menus: Drawn::ByHost,
+                toolbar: Drawn::ByHost,
+                options_bar: Drawn::ByHost,
+                status_bar: Drawn::ByHost,
+                tabs: Drawn::ByHost,
+                dock: Drawn::ByHost,
+                native_panels: vec!["layers".into()],
+            }
+        );
+        assert_eq!(host_chrome(ShellFeatures::none()), None, "no features: PhotoCraft draws everything");
+        let menus_only = host_chrome(ShellFeatures::from([Feature::Menus])).unwrap();
+        assert_eq!(menus_only, HostChrome { menus: Drawn::ByHost, ..HostChrome::default() });
+        let rail = host_chrome(ShellFeatures::from([Feature::Rail])).unwrap();
+        assert_eq!((rail.toolbar, rail.options_bar, rail.dock), (Drawn::ByHost, Drawn::ByHost, Drawn::ByPhotoCraft));
+    }
+
+    /// The panels the host draws natively are PhotoCraft panel ids it knows, each with a native
+    /// panel PhotoCraft offers.
+    #[test]
+    fn native_panels_map_to_offered_panels() {
+        let mut native = Native::default();
+        native.shell(every_feature());
+        let offered: Vec<String> = native.panels().into_iter().map(|p| p.id.as_str().to_owned()).collect();
+        for id in host_chrome(every_feature()).unwrap().native_panels {
+            let mapped = native_panel(&id).unwrap();
+            assert!(offered.iter().any(|o| o == mapped), "{id} → {mapped}");
+        }
+        assert_eq!(native_panel("brushes"), None, "the brush popover isn't the Brushes panel");
+        assert_eq!(native_panel("color"), None);
     }
 
     #[test]

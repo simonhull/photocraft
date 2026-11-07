@@ -34,6 +34,12 @@
 //! - **Native panels** (`native`): the Layers inspector and the brush popover, described with
 //!   craft-mobile's `ui` kit and drawn by the shell; their edits run PhotoCraft's commands, one
 //!   undo step per drag.
+//! - **Native chrome:** a shell that draws the chrome natively ([`CraftApp::shell`]) gets those
+//!   parts of PhotoCraft's (its host chrome), and egui draws just the canvas: the menus go to the
+//!   iPad menu bar and run as the macOS menu bar's do, the toolbar becomes the tool rail, the tabs
+//!   the Documents inspector, the status bar the shell's toasts and progress. Window › Layers
+//!   opens the native inspector; every other panel, and the options bar, opens on demand as a
+//!   floating card over the canvas.
 //! - **Power:** while the device is hot or saving power, live previews run on a reduced copy
 //!   (Preferences › Performance › Low Resolution Previews), whatever the preference says.
 
@@ -47,15 +53,17 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, PoisonError};
 
+use craft_mobile::ui::{CommandId, Feature, ShellFeatures, Shortcut, Status};
 use craft_mobile::{Action, CraftApp, DocumentInfo, Item, Pasted, PickedFile, Platform, Power, SaveRoute, Snapshot, Stylus, WriteOutcome};
 use egui::TouchPhase;
 use photocraft_codecs::{ChannelLayout, EncodeOptions, Image};
 use photocraft_doc::{DocId, Document, Layer};
 use photocraft_engine::Session;
 use photocraft_format::RecoveryStore;
+use photocraft_ui_egui::native_menu::{Event, NativeMenu};
 use photocraft_ui_egui::stylus::PenSample;
 use photocraft_ui_egui::theme::ThemeKind;
-use photocraft_ui_egui::{FileDialogAnswer, FileDialogRequest, HostMenu, HostMenuItem, Inbox, PhotocraftApp, Recoverable, Services};
+use photocraft_ui_egui::{FileDialogAnswer, FileDialogRequest, HostMenu, HostMenuItem, Inbox, OpenHostPanelFn, PhotocraftApp, Recoverable, Services};
 use serde_json::{Value, json};
 
 /// PhotoCraft as `craft-mobile` hosts it.
@@ -85,8 +93,14 @@ pub struct PhotoCraftMobile {
     /// PhotoCraft's own copy as it put it on the clipboard, while the clipboard still holds it
     /// and a paste is reading it (this frame only).
     own_copy: OwnCopy,
-    /// The native panels' state (drags in progress; whether the shell shows them).
+    /// The native panels' state (drags in progress; what the shell draws).
     native: native::Native,
+    /// The commands and shortcuts the shell's menus delivered, for the next frame.
+    menu_events: native::menu::MenuEvents,
+    /// The status last sent to the shell.
+    status: native::status::Sent<Status>,
+    /// The status messages sent to the shell so far, which numbers them.
+    said: u64,
 }
 
 /// PhotoCraft's own copy's pixels for the clipboard service: see [`PhotoCraftMobile::own_copy`].
@@ -268,6 +282,9 @@ impl CraftApp for PhotoCraftMobile {
             answered: None,
             own_copy,
             native: native::Native::default(),
+            menu_events: native::menu::MenuEvents::default(),
+            status: native::status::Sent::default(),
+            said: 0,
         }
     }
 
@@ -343,7 +360,7 @@ impl CraftApp for PhotoCraftMobile {
     }
 
     fn panels(&self) -> Vec<craft_mobile::ui::PanelInfo> {
-        native::panels()
+        self.native.panels()
     }
 
     fn describe(&self, panel: &craft_mobile::ui::PanelId) -> Option<craft_mobile::ui::Panel> {
@@ -352,6 +369,65 @@ impl CraftApp for PhotoCraftMobile {
 
     fn apply(&mut self, ctx: &egui::Context, edit: &craft_mobile::ui::Edit) -> Result<(), craft_mobile::ui::EditError> {
         self.native.apply(&mut self.app, ctx, edit).map_err(Into::into)
+    }
+
+    /// The shell draws `features` natively: PhotoCraft hands it those parts of its chrome, its
+    /// menus go to the shell's menu bar ([`native::menu::MobileMenu`]), and Window › Layers opens
+    /// the native inspector. A shell that restarts says it again, which changes nothing.
+    fn shell(&mut self, ctx: &egui::Context, features: &ShellFeatures) {
+        let features = *features;
+        self.native.shell(features);
+        let chrome = native::host_chrome(features);
+        if self.app.host_chrome() != chrome.as_ref() {
+            self.app.set_host_chrome(chrome);
+        }
+        let services = &mut self.app.services;
+        if !features.contains(Feature::Menus) {
+            services.native_menu = None;
+            self.menu_events.borrow_mut().clear();
+        } else if services.native_menu.is_none() {
+            let menu = native::menu::MobileMenu::new(self.platform.clone(), self.menu_events.clone());
+            services.native_menu = Some(NativeMenu::new(Box::new(menu)));
+        }
+        services.open_host_panel = features.contains(Feature::Panels).then(|| {
+            let shell = self.platform.clone();
+            Box::new(move |id: &str| match native::native_panel(id) {
+                Some(panel) => shell.open_panel(panel),
+                None => log::warn!("photocraft-mobile: no native panel for `{id}`"),
+            }) as OpenHostPanelFn
+        });
+        log::info!("photocraft-mobile: the shell draws {:?}", features.iter().collect::<Vec<_>>());
+        ctx.request_repaint();
+    }
+
+    /// A command from the shell: a menu item, the rail's Tool options, the status's Cancel, a
+    /// Pencil gesture. With the shell's menus it runs on the next frame as a menu click does
+    /// ([`native_menu::run`](photocraft_ui_egui::native_menu::run): not under a dialog); without
+    /// them as its menu item runs it.
+    fn command(&mut self, ctx: &egui::Context, id: &CommandId) -> Result<(), String> {
+        if id.as_str() == native::status::CANCEL {
+            native::status::cancel(&mut self.app);
+            return Ok(());
+        }
+        if self.app.services.native_menu.is_none() {
+            return self.action(ctx, &Action::Command { id: id.to_string(), params: Value::Null });
+        }
+        self.menu_events.borrow_mut().push(Event::Click(id.to_string()));
+        ctx.request_repaint();
+        Ok(())
+    }
+
+    /// A menu item's shortcut: the key press, on the next frame, through PhotoCraft's own key
+    /// handling (text fields, dialogs and tools keep their keys), as a hardware key would.
+    fn shortcut(&mut self, ctx: &egui::Context, shortcut: &Shortcut) {
+        match native::menu::chord(shortcut) {
+            Some(chord) if self.app.services.native_menu.is_some() => {
+                self.menu_events.borrow_mut().push(Event::Key(chord));
+                ctx.request_repaint();
+            }
+            Some(_) => log::warn!("photocraft-mobile: the shortcut {shortcut} came without the shell's menus"),
+            None => log::warn!("photocraft-mobile: {shortcut} isn't a key PhotoCraft knows"),
+        }
     }
 
     /// Start writing crash-recovery copies of every unsaved document, and return: they write on
@@ -461,11 +537,22 @@ impl eframe::App for PhotoCraftMobile {
             }
             _ => None,
         };
+        // A shortcut from the shell's menus is a key press, which PhotoCraft's menu puts in, but no
+        // key went down: release it in the same frame, or egui holds the key down for good.
+        let releases: Vec<egui::Event> = self
+            .menu_events
+            .borrow()
+            .iter()
+            .filter_map(|e| match e {
+                Event::Key(chord) => chord.key_event(false),
+                Event::Click(_) => None,
+            })
+            .collect();
         self.app.raw_input_hook(ctx, raw_input);
+        raw_input.events.extend(releases);
     }
 
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        self.hide_replaced_panels();
         // As files from disk: decoded on a worker, then File › Save writes back to them.
         for (path, bytes) in self.located.take() {
             if let Err(e) = self.app.open_file(&path, &bytes) {
@@ -488,12 +575,11 @@ impl eframe::App for PhotoCraftMobile {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
-        // Window › Layers may have turned it on since `logic`: not even for a frame.
-        self.hide_replaced_panels();
         self.app.ui(ui, frame);
         self.note_writes();
         show_file_names(&mut self.app.ui.status);
         quiet_clipboard(&mut self.app);
+        self.send_status();
     }
 }
 
@@ -505,11 +591,13 @@ fn show_file_names(status: &mut String) {
 }
 
 impl PhotoCraftMobile {
-    /// PhotoCraft's own panels the shell draws natively stay hidden; asking for one opens the
-    /// native panel instead.
-    fn hide_replaced_panels(&mut self) {
-        if let Some(panel) = self.native.hide_replaced_panels(&mut self.app) {
-            self.platform.open_panel(panel);
+    /// The status, to a shell that shows it, when it changed.
+    fn send_status(&mut self) {
+        if !self.native.draws(Feature::Status) {
+            return;
+        }
+        if let Some(status) = self.status.changed(native::status::take(&mut self.app, &mut self.said)) {
+            self.platform.set_status(status.clone());
         }
     }
 
@@ -1093,6 +1181,122 @@ mod tests {
         assert_eq!(share_name(&layered, Some(&path)), "a.psd", "a PNG can't keep its layers");
         assert_eq!(share_name(&layered, Some("/x/c.pdn")), "c.pcraft");
         assert_eq!(share_name(&Document::new("Untitled-1", Size::new(1, 1), ColorMode::Rgb, SampleType::U8), None), "Untitled-1.psd", "never saved");
+    }
+
+    /// PhotoCraft as the host runs it, with a document: frames in eframe's order, the shell's
+    /// controls run inside the frame before `logic`.
+    struct Hosted {
+        app: PhotoCraftMobile,
+        ctx: egui::Context,
+        frame: eframe::Frame,
+    }
+
+    impl Hosted {
+        fn new() -> Self {
+            let ctx = egui::Context::default();
+            let mut app = PhotoCraftMobile::create(&ctx, None, Platform::default());
+            app.app.run("file.new", json!({"width": 8, "height": 8})).expect("a document");
+            Self { app, ctx, frame: eframe::Frame::_new_kittest() }
+        }
+
+        fn frame(&mut self, controls: impl FnOnce(&mut PhotoCraftMobile, &egui::Context)) {
+            let mut raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1194.0, 834.0))), ..Default::default() };
+            eframe::App::raw_input_hook(&mut self.app, &self.ctx, &mut raw);
+            let (app, frame) = (&mut self.app, &mut self.frame);
+            let mut controls = Some(controls);
+            let mut out = self.ctx.run_ui(raw, |ui| {
+                if let Some(controls) = controls.take() {
+                    controls(app, ui.ctx());
+                }
+                eframe::App::logic(app, ui.ctx(), frame);
+                eframe::App::ui(app, ui, frame);
+            });
+            out.textures_delta.clear();
+        }
+
+        fn shell(&mut self, features: ShellFeatures) {
+            self.frame(|app, ctx| app.shell(ctx, &features));
+        }
+    }
+
+    fn every_feature() -> ShellFeatures {
+        ShellFeatures::from(Feature::ALL)
+    }
+
+    /// A shell drawing all the chrome gets it all: the host chrome as `native::host_chrome` says,
+    /// the menus in its menu bar, Window › Layers through it. Saying it again (a restart) changes
+    /// nothing; a shell drawing none gives it all back.
+    #[test]
+    fn a_shell_with_every_feature_takes_over_the_chrome() {
+        let mut h = Hosted::new();
+        assert_eq!(h.app.app.host_chrome(), None, "nothing before the shell says");
+        h.shell(every_feature());
+        assert_eq!(h.app.app.host_chrome(), native::host_chrome(every_feature()).as_ref());
+        assert!(h.app.app.services.native_menu.is_some() && h.app.app.services.open_host_panel.is_some());
+        h.frame(|app, ctx| {
+            photocraft_ui_egui::menus::invoke(&mut app.app, ctx, "window.panel.layers", json!({})).expect("Window › Layers");
+        });
+        assert!(!h.app.app.ui.panels.layers, "the native inspector, not PhotoCraft's panel");
+        h.shell(every_feature());
+        assert_eq!(h.app.app.host_chrome(), native::host_chrome(every_feature()).as_ref());
+        h.shell(ShellFeatures::none());
+        assert_eq!(h.app.app.host_chrome(), None);
+        assert!(h.app.app.services.native_menu.is_none() && h.app.app.services.open_host_panel.is_none());
+    }
+
+    /// A menu item's shortcut runs once, through PhotoCraft's key handling, and leaves no key held.
+    #[test]
+    fn a_menu_shortcut_runs_once_and_releases_its_key() {
+        let mut h = Hosted::new();
+        h.shell(every_feature());
+        let before = h.app.app.ui.extras.rulers;
+        let rulers: Shortcut = "Cmd+R".parse().expect("a shortcut");
+        h.frame(|app, ctx| app.shortcut(ctx, &rulers));
+        h.frame(|_, _| {});
+        assert_eq!(h.app.app.ui.extras.rulers, !before, "View › Rulers, once");
+        assert!(h.ctx.input(|i| i.keys_down.is_empty()), "no key held down");
+        h.frame(|_, _| {});
+        assert_eq!(h.app.app.ui.extras.rulers, !before);
+    }
+
+    /// A menu command runs on the next frame, as a menu click: Window › Color opens its card.
+    #[test]
+    fn a_menu_command_runs_as_a_menu_click() {
+        let mut h = Hosted::new();
+        h.shell(every_feature());
+        h.frame(|app, ctx| app.command(ctx, &"window.toggle.color".into()).expect("queued"));
+        h.frame(|_, _| {});
+        assert!(h.app.app.ui.panels.color, "Window › Color's card is open");
+    }
+
+    /// Pencil's double-tap (`tools.swapColors`) runs with the shell's menus or without.
+    #[test]
+    fn the_pencil_command_runs_with_or_without_the_menus() {
+        let mut h = Hosted::new();
+        let colors = |h: &Hosted| (h.app.app.session.tools.foreground, h.app.app.session.tools.background);
+        let before = colors(&h);
+        h.frame(|app, ctx| app.command(ctx, &"tools.swapColors".into()).expect("ran"));
+        assert_eq!(colors(&h), (before.1, before.0), "swapped at once");
+        h.shell(every_feature());
+        h.frame(|app, ctx| app.command(ctx, &"tools.swapColors".into()).expect("queued"));
+        h.frame(|_, _| {});
+        assert_eq!(colors(&h), before, "swapped back, as a menu click");
+    }
+
+    /// The status goes to a shell that shows it: each message once, as it's set. (A low scratch
+    /// disk may say something too: the counts are at least.)
+    #[test]
+    fn the_status_goes_to_a_shell_that_shows_it() {
+        let mut h = Hosted::new();
+        h.frame(|app, _| app.app.ui.status = "Saved a.psd".into());
+        assert!(!h.app.app.ui.status.is_empty() && h.app.said == 0, "no Status feature: the status bar's");
+        let mut h = Hosted::new();
+        h.shell(ShellFeatures::from([Feature::Status]));
+        let before = h.app.said;
+        h.frame(|app, _| app.app.ui.status = "Saved a.psd".into());
+        assert!(h.app.app.ui.status.is_empty(), "the shell's now");
+        h.frame(|app, _| app.app.ui.status = "Saved a.psd".into());
+        assert!(h.app.said >= before + 2, "said twice");
     }
 
     /// The panel lists layers top first, children under their group, as the desktop panel does.
