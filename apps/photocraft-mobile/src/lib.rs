@@ -350,8 +350,8 @@ impl CraftApp for PhotoCraftMobile {
         self.native.describe(&self.app, panel)
     }
 
-    fn apply(&mut self, ctx: &egui::Context, edit: &craft_mobile::ui::Edit) -> Result<(), String> {
-        self.native.apply(&mut self.app, ctx, edit)
+    fn apply(&mut self, ctx: &egui::Context, edit: &craft_mobile::ui::Edit) -> Result<(), craft_mobile::ui::EditError> {
+        self.native.apply(&mut self.app, ctx, edit).map_err(Into::into)
     }
 
     /// Start writing crash-recovery copies of every unsaved document, and return: they write on

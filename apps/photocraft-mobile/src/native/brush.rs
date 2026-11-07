@@ -105,7 +105,7 @@ mod tests {
     }
 
     fn edit(control: &str, phase: Phase, gesture: u64, value: EditValue) -> Edit {
-        Edit { panel: "brush".into(), control: control.into(), phase, gesture, value }
+        Edit { panel: "brush".into(), control: control.into(), phase, gesture: gesture.into(), value }
     }
 
     fn commit(control: &str, value: EditValue) -> Edit {

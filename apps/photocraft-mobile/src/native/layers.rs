@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 
-use craft_mobile::ui::{Choice, ChoiceOption, Edit, EditValue, ItemList, Node, Number, Panel, PanelRole, Phase, Position, Row, Unit};
+use craft_mobile::ui::{Choice, ChoiceOption, Edit, EditValue, GestureId, ItemList, Node, Number, Panel, PanelRole, Phase, Position, Row, Unit};
 use photocraft_color::BlendMode;
 use photocraft_doc::{DocId, Layer, LayerContent, LayerId};
 use photocraft_engine::DocState;
@@ -35,7 +35,7 @@ struct Drag {
 
 /// The Opacity drags in progress, by gesture. A drag ends with its `commit` or `cancel`.
 #[derive(Debug, Default)]
-pub(crate) struct Drags(HashMap<u64, Drag>);
+pub(crate) struct Drags(HashMap<GestureId, Drag>);
 
 pub(super) fn describe(app: &PhotocraftApp) -> Option<Panel> {
     let st = app.session.active()?;
@@ -144,7 +144,7 @@ fn begin(app: &PhotocraftApp, drags: &mut Drags, edit: &Edit) -> Result<(), Stri
 /// The layers a drag edits: those fixed at its begin, in the document it began in (another one
 /// active since is refused, so the panel shows the app's value again); a value typed in (a commit
 /// alone) edits the layers selected now.
-fn drag_targets(app: &PhotocraftApp, drags: &Drags, gesture: u64) -> Result<Vec<LayerId>, String> {
+fn drag_targets(app: &PhotocraftApp, drags: &Drags, gesture: GestureId) -> Result<Vec<LayerId>, String> {
     let st = active(app)?;
     match drags.0.get(&gesture) {
         Some(drag) if drag.doc != st.doc.id => Err("another document is active since the drag began".into()),
@@ -209,7 +209,7 @@ mod tests {
         }
 
         fn apply(&mut self, control: &str, phase: Phase, gesture: u64, value: EditValue) -> Result<(), String> {
-            let edit = Edit { panel: "layers".into(), control: control.into(), phase, gesture, value };
+            let edit = Edit { panel: "layers".into(), control: control.into(), phase, gesture: gesture.into(), value };
             apply(&mut self.app, &mut self.drags, &self.ctx, &edit)
         }
 
@@ -305,7 +305,7 @@ mod tests {
     fn the_background_has_no_blend_mode_or_opacity_and_refuses_them() {
         let mut p = Inspector::new();
         let background = p.background();
-        p.apply("rows", Phase::Commit, 1, EditValue::Select { row: background }).unwrap();
+        p.apply("rows", Phase::Commit, 1, EditValue::Select { row: background.into() }).unwrap();
         let json = p.json();
         assert_eq!(json["nodes"][0]["enabled"], false, "{json}");
         assert_eq!(json["nodes"][1]["enabled"], false, "{json}");
@@ -370,7 +370,7 @@ mod tests {
         let other = p.new_layer();
         p.apply("opacity", Phase::Begin, 4, EditValue::Number(1.0)).unwrap();
         p.apply("opacity", Phase::Change, 4, EditValue::Number(0.6)).unwrap();
-        p.apply("rows", Phase::Commit, 5, EditValue::Select { row: top }).unwrap();
+        p.apply("rows", Phase::Commit, 5, EditValue::Select { row: top.into() }).unwrap();
         p.apply("opacity", Phase::Commit, 4, EditValue::Number(0.3)).unwrap();
         assert!(close(p.opacity(other), 0.3));
         assert!(close(p.opacity(top), 1.0) && close(p.opacity(below), 1.0));
@@ -460,12 +460,12 @@ mod tests {
         let mut p = Inspector::new();
         let top = p.top;
         p.apply("blend", Phase::Commit, 1, EditValue::Choice("Multiply".into())).unwrap();
-        p.apply("rows", Phase::Commit, 2, EditValue::SetVisible { row: top, visible: false }).unwrap();
-        p.apply("rows", Phase::Commit, 3, EditValue::Rename { row: top, name: "Sky".into() }).unwrap();
+        p.apply("rows", Phase::Commit, 2, EditValue::SetVisible { row: top.into(), visible: false }).unwrap();
+        p.apply("rows", Phase::Commit, 3, EditValue::Rename { row: top.into(), name: "Sky".into() }).unwrap();
         let l = p.layer(top);
         assert_eq!((l.blend, l.visible, l.name.as_str()), (BlendMode::Multiply, false, "Sky"));
         let bottom = p.background();
-        p.apply("rows", Phase::Commit, 4, EditValue::Select { row: bottom }).unwrap();
+        p.apply("rows", Phase::Commit, 4, EditValue::Select { row: bottom.into() }).unwrap();
         assert_eq!(p.state().active_layer, Some(LayerId(bottom)));
     }
 
@@ -474,7 +474,7 @@ mod tests {
         let mut p = Inspector::new();
         let top = p.top;
         let third = p.new_layer();
-        p.apply("rows", Phase::Commit, 1, EditValue::Move { row: third, target: top, position: Position::Below }).unwrap();
+        p.apply("rows", Phase::Commit, 1, EditValue::Move { row: third.into(), target: top.into(), position: Position::Below }).unwrap();
         let order: Vec<u64> = p.state().doc.layers.iter().map(|l| l.id.0).collect();
         assert_eq!(order, [p.background(), third, top], "bottom first");
     }
