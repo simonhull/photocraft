@@ -53,7 +53,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use craft_mobile::ui::{CommandId, Feature, ShellFeatures, Shortcut, Status};
+use craft_mobile::ui::{CommandId, Feature, ShellFeatures, Shortcut};
 use craft_mobile::{Action, CraftApp, DocumentInfo, Item, Pasted, PickedFile, Platform, Power, SaveRoute, Snapshot, Stylus, WriteOutcome};
 use egui::TouchPhase;
 use photocraft_codecs::{ChannelLayout, EncodeOptions, Image};
@@ -97,8 +97,6 @@ pub struct PhotoCraftMobile {
     native: native::Native,
     /// The commands and shortcuts the shell's menus delivered, for the next frame.
     menu_events: native::menu::MenuEvents,
-    /// The status last sent to the shell.
-    status: native::status::Sent<Status>,
     /// The status message standing, and how many have been said, which numbers them.
     said: native::status::Said,
 }
@@ -283,7 +281,6 @@ impl CraftApp for PhotoCraftMobile {
             own_copy,
             native: native::Native::default(),
             menu_events: native::menu::MenuEvents::default(),
-            status: native::status::Sent::default(),
             said: native::status::Said::default(),
         }
     }
@@ -589,14 +586,13 @@ fn show_file_names(status: &mut String) {
 }
 
 impl PhotoCraftMobile {
-    /// The status, to a shell that shows it, when it changed.
+    /// The status, to a shell that shows it.
     fn send_status(&mut self) {
         if !self.native.draws(Feature::Status) {
             return;
         }
-        if let Some(status) = self.status.changed(native::status::take(&mut self.app, &mut self.said)) {
-            self.platform.set_status(status.clone());
-        }
+        // Sent only when it changed (`Platform::set_status`).
+        self.platform.set_status(native::status::take(&mut self.app, &mut self.said));
     }
 
     /// Remove the recovery copies written on leaving the screen whose documents have no unsaved

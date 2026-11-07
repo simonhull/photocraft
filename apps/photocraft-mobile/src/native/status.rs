@@ -83,27 +83,6 @@ pub(crate) fn cancel(app: &mut PhotocraftApp) -> bool {
     jobs_ui::job_in_view(app).is_some_and(|job| jobs_ui::cancel(app, job.id))
 }
 
-/// The last value sent to the shell, so a value goes out only when it changes.
-#[derive(Debug)]
-pub(crate) struct Sent<T>(Option<T>);
-
-impl<T> Default for Sent<T> {
-    fn default() -> Self {
-        Self(None)
-    }
-}
-
-impl<T: PartialEq> Sent<T> {
-    /// `next`, when it differs from the last value sent: it's the last one sent from now on.
-    pub(crate) fn changed(&mut self, next: T) -> Option<&T> {
-        if self.0.as_ref() == Some(&next) {
-            return None;
-        }
-        self.0 = Some(next);
-        self.0.as_ref()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,15 +151,5 @@ mod tests {
         assert_eq!(progress["cancel"], CANCEL, "{progress}");
         assert!(progress["label"].as_str().is_some_and(|l| !l.is_empty()), "{progress}");
         assert!(cancel(&mut app), "Cancel stops it");
-    }
-
-    #[test]
-    fn a_value_is_sent_only_when_it_changes() {
-        let mut sent = Sent::default();
-        assert_eq!(sent.changed(Status::new().info("a")), Some(&Status::new().info("a")));
-        assert_eq!(sent.changed(Status::new().info("a")), None);
-        assert_eq!(sent.changed(Status::new().error("a")), Some(&Status::new().error("a")));
-        assert_eq!(sent.changed(Status::new()), Some(&Status::new()));
-        assert_eq!(sent.changed(Status::new()), None);
     }
 }
