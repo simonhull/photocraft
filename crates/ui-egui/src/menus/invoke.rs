@@ -799,21 +799,24 @@ fn toggle_panels(app: &mut PhotocraftApp) -> Result<Value, String> {
         app.ui.panels.full_screen_chrome = !app.ui.panels.full_screen_chrome;
         return Ok(Value::Null);
     }
-    // Host mode: Tab hides and shows the floating cards (the host draws the bars).
-    if app.host_toggle_cards() {
-        return Ok(Value::Null);
-    }
+    // Host mode: Tab hides and shows the floating cards of the parts the host draws, and with
+    // them whichever of the toolbar, options bar and dock PhotoCraft still draws.
+    app.host_toggle_cards();
+    let own = [!app.host_draws(|c| c.toolbar), !app.host_draws(|c| c.options_bar), !app.host_draws(|c| c.dock)];
     let panels = &mut app.ui.panels;
-    match panels.hidden_by_tab.take() {
-        Some([toolbar, options, dock]) if !(panels.toolbar || panels.options_bar || panels.dock) => {
-            (panels.toolbar, panels.options_bar, panels.dock) = (toolbar, options, dock);
+    let now = [panels.toolbar, panels.options_bar, panels.dock];
+    // Only the parts PhotoCraft draws change; the others keep their flags.
+    let set = |values: [bool; 3]| std::array::from_fn(|i| if own[i] { values[i] } else { now[i] });
+    let shown = now.iter().zip(own).any(|(part, own)| own && *part);
+    let next: [bool; 3] = match panels.hidden_by_tab.take() {
+        Some(hidden) if !shown => set(hidden),
+        _ if shown => {
+            panels.hidden_by_tab = Some(now);
+            set([false; 3])
         }
-        _ if panels.toolbar || panels.options_bar || panels.dock => {
-            panels.hidden_by_tab = Some([panels.toolbar, panels.options_bar, panels.dock]);
-            (panels.toolbar, panels.options_bar, panels.dock) = (false, false, false);
-        }
-        _ => (panels.toolbar, panels.options_bar, panels.dock) = (true, true, true),
-    }
+        _ => set([true; 3]),
+    };
+    [panels.toolbar, panels.options_bar, panels.dock] = next;
     Ok(Value::Null)
 }
 

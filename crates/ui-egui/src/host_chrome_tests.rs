@@ -338,6 +338,24 @@ fn full_screen_hides_the_cards() {
     assert_eq!(cards(&h).len(), 2);
 }
 
+/// With some of the chrome still PhotoCraft's, Tab hides and shows those parts too, with the cards.
+#[test]
+fn tab_with_partial_chrome_hides_the_cards_and_the_parts_photocraft_draws() {
+    let chrome = HostChrome { dock: Drawn::ByHost, tabs: Drawn::ByHost, ..HostChrome::default() };
+    let mut h = app(Some(chrome));
+    run(&mut h, "window.toggle.color");
+    assert_eq!(cards(&h), ["Color"]);
+    let shown = |h: &Harness<'static, PhotocraftApp>| (h.state().ui.panels.toolbar, h.state().ui.panels.options_bar);
+    assert_eq!(shown(&h), (true, true));
+    run(&mut h, "window.togglePanels");
+    assert!(cards(&h).is_empty(), "{:?}", cards(&h));
+    assert_eq!(shown(&h), (false, false), "the toolbar and options bar hide too");
+    assert!(!shows(&h, TOOLBAR));
+    run(&mut h, "window.togglePanels");
+    assert_eq!(cards(&h), ["Color"]);
+    assert_eq!(shown(&h), (true, true));
+}
+
 #[test]
 fn tab_hides_and_shows_the_cards() {
     let (mut h, _) = host_app();
