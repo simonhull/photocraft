@@ -8,12 +8,12 @@
 
 use std::collections::HashMap;
 
-use craft_mobile::ui::{Choice, ChoiceOption, Edit, EditValue, GestureId, ItemList, Node, Number, Panel, PanelRole, Phase, Position, Row, Unit};
+use craft_mobile::ui::{Choice, ChoiceOption, Edit, EditValue, GestureId, ItemList, Node, Number, Panel, PanelRole, Phase, Position, Row, SelectMode, Unit};
 use photocraft_color::BlendMode;
 use photocraft_doc::{DocId, Layer, LayerContent, LayerId};
 use photocraft_engine::DocState;
 use photocraft_ui_egui::PhotocraftApp;
-use photocraft_ui_egui::panels::{blend_options, prop_target_params, prop_targets, targets_are_groups};
+use photocraft_ui_egui::panels::{blend_options, layer_drop_payload, prop_target_params, prop_targets, targets_are_groups};
 use serde_json::{Value, json};
 
 use super::{coalesce_key, fraction, run};
@@ -102,7 +102,15 @@ pub(super) fn apply(app: &mut PhotocraftApp, drags: &mut Drags, ctx: &egui::Cont
             let (_, ids) = targets(active(app)?)?;
             set(app, ctx, &ids, "blend", json!(mode.label()), edit)
         }
-        (_, EditValue::Select { row }, ROWS) => run(app, ctx, "layer.select", json!({"layer": row}), edit),
+        (_, EditValue::Select { row, mode }, ROWS) => {
+            // The desktop Layers panel's plain, Command and Shift clicks.
+            let mode = match mode {
+                SelectMode::Replace => "replace",
+                SelectMode::Toggle => "toggle",
+                SelectMode::Range => "range",
+            };
+            run(app, ctx, "layer.select", json!({"layer": row, "mode": mode}), edit)
+        }
         (_, EditValue::SetVisible { row, visible }, ROWS) => run(app, ctx, "layer.setProps", json!({"layer": row, "visible": visible}), edit),
         (_, EditValue::Rename { row, name }, ROWS) => run(app, ctx, "layer.renameLayer", json!({"layer": row, "name": name}), edit),
         (_, EditValue::Move { row, target, position }, ROWS) => {
@@ -110,7 +118,9 @@ pub(super) fn apply(app: &mut PhotocraftApp, drags: &mut Drags, ctx: &egui::Cont
                 Position::Above => "above",
                 Position::Below => "below",
             };
-            run(app, ctx, "layer.moveTo", json!({"layer": row, "target": target, "position": position}), edit)
+            // As the desktop's drag: a row of a multi-selection moves the whole selection.
+            let selected = active(app)?.selected_layers();
+            run(app, ctx, "layer.moveTo", layer_drop_payload(row.get(), LayerId(target.get()), position, &selected), edit)
         }
         (_, value, control) => Err(format!("layers: `{control}` doesn't take {value:?}")),
     }
@@ -324,7 +334,7 @@ mod tests {
     fn the_background_has_no_blend_mode_or_opacity_and_refuses_them() {
         let mut p = Inspector::new();
         let background = p.background();
-        p.apply("rows", Phase::Commit, 1, EditValue::Select { row: background.into() }).unwrap();
+        p.apply("rows", Phase::Commit, 1, EditValue::Select { row: background.into(), mode: SelectMode::Replace }).unwrap();
         let json = p.json();
         assert_eq!(json["nodes"][0]["enabled"], false, "{json}");
         assert_eq!(json["nodes"][1]["enabled"], false, "{json}");
@@ -405,7 +415,7 @@ mod tests {
         let other = p.new_layer();
         p.apply("opacity", Phase::Begin, 4, EditValue::Number(1.0)).unwrap();
         p.apply("opacity", Phase::Change, 4, EditValue::Number(0.6)).unwrap();
-        p.apply("rows", Phase::Commit, 5, EditValue::Select { row: top.into() }).unwrap();
+        p.apply("rows", Phase::Commit, 5, EditValue::Select { row: top.into(), mode: SelectMode::Replace }).unwrap();
         p.apply("opacity", Phase::Commit, 4, EditValue::Number(0.3)).unwrap();
         assert!(close(p.opacity(other), 0.3));
         assert!(close(p.opacity(top), 1.0) && close(p.opacity(below), 1.0));
@@ -532,8 +542,56 @@ mod tests {
         let l = p.layer(top);
         assert_eq!((l.blend, l.visible, l.name.as_str()), (BlendMode::Multiply, false, "Sky"));
         let bottom = p.background();
-        p.apply("rows", Phase::Commit, 4, EditValue::Select { row: bottom.into() }).unwrap();
+        p.apply("rows", Phase::Commit, 4, EditValue::Select { row: bottom.into(), mode: SelectMode::Replace }).unwrap();
         assert_eq!(p.state().active_layer, Some(LayerId(bottom)));
+    }
+
+    fn select_row(p: &mut Inspector, row: u64, mode: SelectMode) {
+        p.apply("rows", Phase::Commit, 1, EditValue::Select { row: row.into(), mode }).unwrap();
+    }
+
+    fn selected(p: &Inspector) -> Vec<u64> {
+        let mut ids: Vec<u64> = p.state().selected_layers().iter().map(|id| id.0).collect();
+        ids.sort_unstable();
+        ids
+    }
+
+    /// The modes are the desktop Layers panel's clicks: plain, Command and Shift.
+    #[test]
+    fn rows_select_by_mode() {
+        let mut p = Inspector::new();
+        let (top, background) = (p.top, p.background());
+        let (a, b) = (p.new_layer(), p.new_layer());
+        select_row(&mut p, top, SelectMode::Replace);
+        assert_eq!(selected(&p), [top]);
+        select_row(&mut p, b, SelectMode::Toggle);
+        assert_eq!(selected(&p), [top, b], "added");
+        assert_eq!(p.state().active_layer, Some(LayerId(b)));
+        select_row(&mut p, b, SelectMode::Toggle);
+        assert_eq!(selected(&p), [top], "taken out again");
+        select_row(&mut p, b, SelectMode::Range);
+        assert_eq!(selected(&p), [top, a, b], "from the last selected to this one");
+        select_row(&mut p, background, SelectMode::Replace);
+        assert_eq!(selected(&p), [background]);
+    }
+
+    /// A row dragged out of a multi-selection moves the whole selection, in one step, as the
+    /// desktop's drag does; an unselected row moves alone.
+    #[test]
+    fn a_selected_row_moves_the_whole_selection() {
+        let mut p = Inspector::new();
+        let (top, background) = (p.top, p.background());
+        let (a, b, c) = (p.new_layer(), p.new_layer(), p.new_layer());
+        select_row(&mut p, top, SelectMode::Replace);
+        select_row(&mut p, a, SelectMode::Toggle);
+        let order = |p: &Inspector| p.state().doc.layers.iter().map(|l| l.id.0).collect::<Vec<_>>();
+        assert_eq!(order(&p), [background, top, a, b, c], "bottom first");
+        p.apply("rows", Phase::Commit, 2, EditValue::Move { row: top.into(), target: c.into(), position: Position::Above }).unwrap();
+        assert_eq!(order(&p), [background, b, c, top, a], "both, in their order");
+        p.undo();
+        assert_eq!(order(&p), [background, top, a, b, c], "one step");
+        p.apply("rows", Phase::Commit, 3, EditValue::Move { row: b.into(), target: c.into(), position: Position::Above }).unwrap();
+        assert_eq!(order(&p), [background, top, a, c, b], "an unselected row alone");
     }
 
     #[test]
