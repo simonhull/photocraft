@@ -5,7 +5,7 @@
 //! painting tool and saves the session brush into it on a tool switch), so what it sets is what
 //! paints. The brush is a tool option, not part of the document: its edits make no history step.
 
-use craft_mobile::ui::{Choice, ChoiceOption, Edit, EditValue, Node, Number, Panel, PanelRole, Phase, Section, Toggle, Unit};
+use craft_mobile::ui::{Choice, ChoiceOption, Edit, EditValue, Node, Number, Panel, PanelRole, Phase, Scale, Section, Toggle, Unit};
 use photocraft_engine::paint::MAX_BRUSH_SIZE;
 use photocraft_engine::paint::brush::Control;
 use photocraft_ui_egui::PhotocraftApp;
@@ -36,7 +36,9 @@ pub(super) fn describe(app: &PhotocraftApp) -> Panel {
     let b = &app.session.tools.brush;
     let dynamics = &b.shape_dynamics;
     let mut tip = Vec::with_capacity(3);
-    if let Ok(size) = Number::new("size", "Size", MIN_SIZE..=f64::from(MAX_BRUSH_SIZE), f64::from(b.size)) {
+    // A log scale: 1 px to 5000 px on a linear slider leaves the sizes people paint with in its
+    // first few points.
+    if let Ok(size) = Number::new("size", "Size", MIN_SIZE..=f64::from(MAX_BRUSH_SIZE), f64::from(b.size)).and_then(|n| n.scale(Scale::Log)) {
         tip.push(Node::Number(size.unit(Unit::Pixels).step(1.0)));
     }
     for (id, label, value) in [("opacity", "Opacity", b.opacity), ("flow", "Flow", b.flow)] {
@@ -128,6 +130,8 @@ mod tests {
         let b = &app.session.tools.brush;
         assert_eq!(node(&nodes, "size").unwrap()["value"], json!(f64::from(b.size)), "{nodes}");
         assert_eq!(node(&nodes, "size").unwrap()["unit"], "pixels");
+        assert_eq!(node(&nodes, "size").unwrap()["scale"], "log", "1 px to 5000 px: small sizes get room");
+        assert!(node(&nodes, "opacity").unwrap().get("scale").is_none(), "linear, the default, isn't sent");
         for id in ["opacity", "flow"] {
             assert_eq!(node(&nodes, id).unwrap()["unit"], "percent", "{id}");
         }
