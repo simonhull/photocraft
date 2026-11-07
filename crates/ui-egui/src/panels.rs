@@ -89,7 +89,8 @@ pub(crate) use layer_drag::{dropped_on, layer_drag_edge_scroll};
 pub(crate) use layer_row::thumb_load_badge;
 #[cfg(test)]
 use layer_row::{layer_thumb_fit, paint_clipping_indicator};
-pub(crate) use layers::{blend_options, fx_button};
+pub(crate) use layers::fx_button;
+pub use layers::{blend_options, prop_target_params, prop_targets, targets_are_groups};
 #[cfg(test)]
 use layers::{layers, opacity_row_layout, simple_lock_toggle};
 #[cfg(test)]

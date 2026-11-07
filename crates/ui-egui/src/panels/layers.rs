@@ -4,6 +4,8 @@ use super::layer_drag::{
 };
 use super::layer_row::{RowSel, layer_row};
 use super::options_bar::{LAYER_PCT_W, body_text_width, pct_action, scrub_pct_label};
+use photocraft_doc::Document;
+
 use super::{
     BlendMode, Layer, LayerId, MaskKind, PhotocraftApp, Rect, Sense, Tokens, Value, empty, icons, json, label, pos2, starts_blend_group, theme, vec2, widgets,
 };
@@ -30,9 +32,35 @@ pub(super) fn simple_lock_toggle(background: bool, l: &Layer, targets: &Value) -
 
 /// The Layers panel's blend modes: Photoshop's, plus the layer's own Paint.NET mode when it has one
 /// (an imported `.pdn`), so the menu matches Photoshop's for every other layer.
-pub(crate) fn blend_options(groups: bool, current: BlendMode) -> Vec<(BlendMode, &'static str)> {
+pub fn blend_options(groups: bool, current: BlendMode) -> Vec<(BlendMode, &'static str)> {
     let own = Some(current).filter(|m| !m.has_psd_equivalent());
     std::iter::once(BlendMode::PassThrough).filter(|_| groups).chain(BlendMode::LAYER_MODES).chain(own).map(|m| (m, m.label())).collect()
+}
+
+/// The layers the Layers panel's blend mode, Opacity, Fill and locks change, with `active` the
+/// active layer: with several layers selected, every one of them, as in Photoshop. The Background
+/// stays out of a several-layer change until Photoshop's behaviour is confirmed (#5856): Opacity,
+/// Fill or a blend mode would turn it into Layer 0. The active layer is always among them.
+pub fn prop_targets(doc: &Document, active: LayerId, selection: &[LayerId]) -> Vec<LayerId> {
+    if selection.len() > 1 && selection.contains(&active) {
+        selection.iter().copied().filter(|id| *id == active || !doc.layer(*id).is_some_and(|x| crate::doc_props_ui::is_background(doc, x))).collect()
+    } else {
+        vec![active]
+    }
+}
+
+/// `layer.setProps`' target params for [`prop_targets`]: `{"layer": id}` for one layer,
+/// `{"layers": [ids]}` for several.
+pub fn prop_target_params(ids: &[LayerId]) -> Value {
+    match ids {
+        [one] => json!({"layer": one.0}),
+        _ => json!({"layers": ids.iter().map(|id| id.0).collect::<Vec<_>>()}),
+    }
+}
+
+/// Pass Through is a group's mode: the blend menu offers it only when every target is a group.
+pub fn targets_are_groups(doc: &Document, ids: &[LayerId]) -> bool {
+    ids.iter().all(|id| doc.layer(*id).is_some_and(Layer::is_group))
 }
 
 /// Fit blend mode + Opacity into the available Layers-panel width (#2309).
@@ -135,17 +163,13 @@ pub(super) fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         // of them, as in Photoshop; the controls show the active layer's values.
         // The Background stays out of a several-layer change until Photoshop's behaviour is
         // confirmed (#5856): Opacity, Fill or a blend mode would turn it into Layer 0.
-        let ids: Vec<LayerId> = if selection.len() > 1 && selection.contains(&l.id) {
-            selection.iter().copied().filter(|id| *id == l.id || !doc.layer(*id).is_some_and(|x| crate::doc_props_ui::is_background(&doc, x))).collect()
-        } else {
-            vec![l.id]
-        };
-        let targets = if ids.len() > 1 { json!({"layers": ids.iter().map(|id| id.0).collect::<Vec<_>>()}) } else { json!({"layer": l.id.0}) };
+        let ids = prop_targets(&doc, l.id, &selection);
+        let targets = prop_target_params(&ids);
         // Photoshop greys blend mode, Opacity and Fill for the Background layer. (With the
         // Background among several selected, what Photoshop does awaits a check: #5856.)
         let bg = crate::doc_props_ui::is_background(&doc, l);
         // Pass Through is a group's mode: offered only when every target is a group.
-        let all_groups = ids.iter().all(|id| doc.layer(*id).is_some_and(|x| x.is_group()));
+        let all_groups = targets_are_groups(&doc, &ids);
         ui.horizontal(|ui| {
             ui.add_enabled_ui(!bg, |ui| {
                 let mut m = l.blend;
@@ -619,4 +643,42 @@ pub(crate) fn fx_button(ui: &mut egui::Ui, size: f32, tip: &str) -> egui::Respon
 
 pub(super) fn channels(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     crate::channels_panel::show(app, ui);
+}
+
+#[cfg(test)]
+mod target_tests {
+    use super::*;
+    use photocraft_engine::Session;
+
+    /// A document with the Background and two layers, all three selected, the top one active.
+    fn three_selected() -> (Session, Vec<LayerId>) {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 4, "height": 4})).unwrap();
+        s.execute("layer.new.layer", json!({})).unwrap();
+        s.execute("layer.new.layer", json!({})).unwrap();
+        let ids: Vec<LayerId> = s.active().unwrap().doc.layers.iter().map(|l| l.id).collect();
+        for id in &ids {
+            s.execute("layer.select", json!({"layer": id.0, "mode": "add"})).unwrap();
+        }
+        (s, ids)
+    }
+
+    #[test]
+    fn several_selected_layers_are_targets_but_never_the_background() {
+        let (s, ids) = three_selected();
+        let st = s.active().unwrap();
+        let active = st.active_layer.unwrap();
+        let targets = prop_targets(&st.doc, active, &st.selected_layers());
+        assert_eq!(targets, ids[1..], "the Background stays out");
+        assert_eq!(prop_target_params(&targets), json!({"layers": [ids[1].0, ids[2].0]}));
+        assert!(!targets_are_groups(&st.doc, &targets));
+    }
+
+    #[test]
+    fn the_active_layer_alone_is_a_target_even_the_background() {
+        let (s, ids) = three_selected();
+        let st = s.active().unwrap();
+        assert_eq!(prop_targets(&st.doc, ids[0], &[ids[0]]), [ids[0]]);
+        assert_eq!(prop_target_params(&[ids[0]]), json!({"layer": ids[0].0}));
+    }
 }
