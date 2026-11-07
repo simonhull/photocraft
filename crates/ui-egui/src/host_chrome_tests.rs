@@ -232,3 +232,33 @@ fn floating_panels_are_checked_and_native_ones_never() {
     h.state_mut().ui.panels.layers = true;
     assert_eq!(menu_checked(&h, "window.panel.layers"), Some(false), "the host knows what it shows");
 }
+
+// ------------------------------------------------------------------ options bar on demand
+
+#[test]
+fn window_options_shows_the_tools_options_in_a_card_at_the_top() {
+    let (mut h, _) = host_app();
+    assert!(!shows(&h, OPTIONS), "hidden until asked for");
+    h.state_mut().ui.tool = crate::state::Tool::Move;
+    run(&mut h, "window.toggle.options");
+    assert_eq!(cards(&h), [crate::state::Tool::Move.label()]);
+    let auto_select = h.query_all_by_label_contains(OPTIONS).next().expect("the Move tool's options").rect();
+    assert!(auto_select.top() < canvas(&h).top() + 120.0, "at the top of the canvas: {auto_select:?}");
+    assert_eq!(menu_checked(&h, "window.panel.options"), Some(true));
+    run(&mut h, "window.toggle.options");
+    assert!(cards(&h).is_empty() && !shows(&h, OPTIONS), "toggled again, it hides");
+}
+
+#[test]
+fn choosing_another_tool_closes_the_options_card() {
+    let (mut h, _) = host_app();
+    h.state_mut().ui.tool = crate::state::Tool::Move;
+    run(&mut h, "window.toggle.options");
+    assert!(shows(&h, OPTIONS));
+    run(&mut h, "tools.select.brush");
+    assert!(cards(&h).is_empty(), "{:?}", cards(&h));
+    assert!(!h.state().ui.panels.options_bar);
+    // Asked for again, it shows the new tool's options.
+    run(&mut h, "window.toggle.options");
+    assert_eq!(cards(&h), [crate::state::Tool::Brush.label()]);
+}

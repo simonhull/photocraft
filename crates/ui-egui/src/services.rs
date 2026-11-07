@@ -459,7 +459,8 @@ pub struct HostChrome {
     pub menus: Drawn,
     /// The toolbar (tool rail).
     pub toolbar: Drawn,
-    /// The options bar.
+    /// The options bar: Window › Options shows it on demand instead, as a floating card at the top
+    /// of the canvas, until the tool changes.
     pub options_bar: Drawn,
     /// The status bar (the host shows `ui.status` and job progress).
     pub status_bar: Drawn,

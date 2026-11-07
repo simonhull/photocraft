@@ -3,6 +3,8 @@ use super::properties::{select_and_mask_button, selection_mode_buttons};
 use super::{BlendMode, Color32, PhotocraftApp, RichText, Sense, Tokens, Tool, Value, icons, json, starts_blend_group, vec2, widgets};
 use photocraft_paint::BrushSettings;
 
+use super::float_card::{CardSize, FloatCard, Header};
+
 // Custom controls also need to bring keyboard focus into a scroll viewport.
 pub(super) fn reveal_focused_control(ui: &egui::Ui) {
     // read_response reprocesses pointer events. Reading a popup's newly focused field
@@ -47,108 +49,149 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         .exact_size(options_bar_height(t.pro, narrow))
         .frame(egui::Frame::NONE.fill(t.chrome).inner_margin(egui::Margin::symmetric(10, 0)))
         .show(ui, |ui| {
-            ui.style_mut().spacing.scroll = egui::style::ScrollStyle { bar_width: 4.0, ..egui::style::ScrollStyle::floating() };
-            egui::ScrollArea::horizontal().id_salt("tool-options").auto_shrink([false, false]).show(ui, |ui| {
-                // Font ink can extend beyond its advance width at fractional positions.
-                // Include its gutter in the container layout, including right-aligned actions.
-                egui::Frame::NONE.inner_margin(egui::Margin { right: 2, ..Default::default() }).show(ui, |ui| {
-                    crate::direction::horizontal_centered(ui, |ui| {
-                        if t.pro {
-                            crate::chrome_ui::home_button(app, ui);
-                            widgets::vline(ui, 22.0);
-                        }
-                        let tool_icon = icons::button(ui, icons::tool_icon(app.ui.tool), if t.pro { 26.0 } else { 28.0 }, !t.pro, tl!(app.ui.tool.label()));
-                        // Photoshop: right-click the tool icon for Reset Tool / Reset All Tools (#2825).
-                        let mut reset = None;
-                        tool_icon.context_menu(|ui| {
-                            if ui.button(tl!("Reset Tool")).clicked() {
-                                reset = Some("tool.reset");
-                                ui.close();
-                            }
-                            if ui.button(tl!("Reset All Tools")).clicked() {
-                                reset = Some("tool.resetAll");
-                                ui.close();
-                            }
-                        });
-                        if let Some(id) = reset
-                            && let Err(e) = crate::menus::invoke(app, ui.ctx(), id, json!({}))
-                        {
-                            app.ui.status = e;
-                        }
-                        if t.pro {
-                            let (r, _) = ui.allocate_exact_size(vec2(10.0, 20.0), Sense::hover());
-                            icons::paint(ui, r, "chevron-down", 10.0, t.text_faint);
-                        }
-                        widgets::vline(ui, 22.0);
-                        if app.ui.transform.is_some() {
-                            crate::transform_tool::options_bar(app, ui);
-                            return;
-                        }
-                        if crate::symmetry_ui::options_bar(app, ui) || crate::distort_ui::options_bar(app, ui) {
-                            return;
-                        }
-                        let tool = app.ui.tool;
-                        // The options bar shows the active tool's brush: switch it in before drawing the
-                        // chip, so a tool change swaps the brush with it (Photoshop keeps one per tool).
-                        crate::paint_mouse::sync_tool_brush(app);
-                        // Brush edits here go through `tools.setBrush`, one journal entry per gesture (Rule 1).
-                        if (tool.is_brushlike() && !matches!(tool, Tool::Brush | Tool::Pencil | Tool::MixerBrush | Tool::Eraser))
-                            || tool == Tool::QuickSelection
-                        {
-                            brush_preset_chip(ui, &app.session.tools.brush, &mut app.ui);
-                            crate::brush_picker::settings_toggle(app, ui);
-                            widgets::vline(ui, 22.0);
-                        }
-                        if matches!(tool, Tool::CloneStamp | Tool::PatternStamp | Tool::HistoryBrush | Tool::Healing | Tool::ArtHistoryBrush) {
-                            let before = app.session.tools.brush.clone();
-                            let mut brush = before.clone();
-                            // Mode is the tool's own brush's, kept per tool like its size.
-                            if let Some(modes) = crate::blend_keys::tool_modes(tool) {
-                                opt_label(ui, tl!("Mode"));
-                                if let Some(Some(m)) =
-                                    tool_mode_dropdown(ui, "retouch-mode", &modes, Some(crate::blend_keys::brush_tool_mode(tool, brush.mode)))
-                                {
-                                    brush.mode = m;
-                                }
-                            }
-                            if matches!(tool, Tool::CloneStamp | Tool::HistoryBrush) {
-                                let width = if t.pro { 62.0 } else { 66.0 };
-                                percent_field(ui, tl!("Opacity"), &mut brush.opacity, 1.0..=100.0, width);
-                                percent_field(ui, tl!("Flow"), &mut brush.flow, 1.0..=100.0, width);
-                            }
-                            // Art History has no Mode (the engine paints Normal) and no Flow.
-                            if tool == Tool::ArtHistoryBrush {
-                                let width = if t.pro { 62.0 } else { 66.0 };
-                                percent_field(ui, tl!("Opacity"), &mut brush.opacity, 1.0..=100.0, width);
-                            }
-                            crate::brush_panel::commit_gesture(app, ui.ctx(), &before, &brush);
-                            widgets::vline(ui, 22.0);
-                        }
-                        if crate::eraser_ui::options_bar(app, ui, tool)
-                            || crate::retouch_ui::options_bar(app, ui, tool)
-                            || crate::vector_ui::options_bar(app, ui, tool)
-                            || crate::analysis_ui::options_bar(app, ui, tool)
-                            || crate::slice_ui::options_bar(app, ui, tool)
-                            || crate::frame_tool::options_bar(app, ui, tool)
-                            || crate::artboard_tool::options_bar(app, ui, tool)
-                        {
-                            return;
-                        }
-                        let brush_before = app.session.tools.brush.clone();
-                        let mut brush = brush_before.clone();
-                        let b = &mut brush;
-                        tool_specific_options(app, ui, t, tool, b);
-                        // Painting symmetry is independent of visual theme. Keep the options-bar
-                        // action available for Brush, Pencil and Eraser in every palette (#2659).
-                        if matches!(tool, Tool::Brush | Tool::Pencil | Tool::Eraser) {
-                            crate::symmetry_ui::menu(app, ui);
-                        }
-                        crate::brush_panel::commit_gesture(app, ui.ctx(), &brush_before, &brush);
-                    });
-                    reveal_focused_control(ui);
-                });
-            });
+            contents(app, ui, t);
         });
+}
+
+/// The options bar while the host draws it (`HostChrome::options_bar`): on demand, as a floating
+/// card at the top of the canvas. Window › Options shows it for the tool of the moment; choosing
+/// another tool closes it, as the host offers each tool's options its own way.
+pub(crate) fn options_card(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    let shown_for = egui::Id::unique("options-card-tool");
+    if !app.ui.panels.options_bar {
+        ctx.data_mut(|data| data.remove::<Tool>(shown_for));
+        return;
+    }
+    let tool = app.ui.tool;
+    if ctx.data_mut(|data| *data.get_temp_mut_or_insert_with(shown_for, || tool)) != tool {
+        app.ui.panels.options_bar = false;
+        ctx.data_mut(|data| data.remove::<Tool>(shown_for));
+        return;
+    }
+    crate::vector_ui::track_arrow_default_selection(app, ctx);
+    let t = Tokens::get(ctx);
+    let height = options_bar_height(t.pro, app.session.prefs().workspace.narrow_options_bar());
+    let canvas = app.last_canvas_rect;
+    // The card's 8-point margins inside the canvas's 16-point ones.
+    let width = (canvas.width() - 48.0).max(240.0);
+    let card = FloatCard {
+        id: egui::Id::unique("options-card"),
+        title: tool.label(),
+        pos: canvas.left_top() + vec2(16.0, 16.0),
+        size: CardSize::Width(width),
+        header: Header::Touch,
+    };
+    let body = |app: &mut PhotocraftApp, ui: &mut egui::Ui| {
+        ui.allocate_ui(vec2(width, height), |ui| {
+            ui.set_height(height);
+            contents(app, ui, t);
+        });
+    };
+    if card.show(app, ctx, |_, _| {}, body) {
+        app.ui.panels.options_bar = false;
+    }
+}
+
+/// The bar's contents: the tool's icon (with Reset Tool) and its options, scrolling sideways
+/// when they don't fit.
+fn contents(app: &mut PhotocraftApp, ui: &mut egui::Ui, t: Tokens) {
+    ui.style_mut().spacing.scroll = egui::style::ScrollStyle { bar_width: 4.0, ..egui::style::ScrollStyle::floating() };
+    egui::ScrollArea::horizontal().id_salt("tool-options").auto_shrink([false, false]).show(ui, |ui| {
+        // Font ink can extend beyond its advance width at fractional positions.
+        // Include its gutter in the container layout, including right-aligned actions.
+        egui::Frame::NONE.inner_margin(egui::Margin { right: 2, ..Default::default() }).show(ui, |ui| {
+            crate::direction::horizontal_centered(ui, |ui| {
+                if t.pro {
+                    crate::chrome_ui::home_button(app, ui);
+                    widgets::vline(ui, 22.0);
+                }
+                let tool_icon = icons::button(ui, icons::tool_icon(app.ui.tool), if t.pro { 26.0 } else { 28.0 }, !t.pro, tl!(app.ui.tool.label()));
+                // Photoshop: right-click the tool icon for Reset Tool / Reset All Tools (#2825).
+                let mut reset = None;
+                tool_icon.context_menu(|ui| {
+                    if ui.button(tl!("Reset Tool")).clicked() {
+                        reset = Some("tool.reset");
+                        ui.close();
+                    }
+                    if ui.button(tl!("Reset All Tools")).clicked() {
+                        reset = Some("tool.resetAll");
+                        ui.close();
+                    }
+                });
+                if let Some(id) = reset
+                    && let Err(e) = crate::menus::invoke(app, ui.ctx(), id, json!({}))
+                {
+                    app.ui.status = e;
+                }
+                if t.pro {
+                    let (r, _) = ui.allocate_exact_size(vec2(10.0, 20.0), Sense::hover());
+                    icons::paint(ui, r, "chevron-down", 10.0, t.text_faint);
+                }
+                widgets::vline(ui, 22.0);
+                if app.ui.transform.is_some() {
+                    crate::transform_tool::options_bar(app, ui);
+                    return;
+                }
+                if crate::symmetry_ui::options_bar(app, ui) || crate::distort_ui::options_bar(app, ui) {
+                    return;
+                }
+                let tool = app.ui.tool;
+                // The options bar shows the active tool's brush: switch it in before drawing the
+                // chip, so a tool change swaps the brush with it (Photoshop keeps one per tool).
+                crate::paint_mouse::sync_tool_brush(app);
+                // Brush edits here go through `tools.setBrush`, one journal entry per gesture (Rule 1).
+                if (tool.is_brushlike() && !matches!(tool, Tool::Brush | Tool::Pencil | Tool::MixerBrush | Tool::Eraser)) || tool == Tool::QuickSelection {
+                    brush_preset_chip(ui, &app.session.tools.brush, &mut app.ui);
+                    crate::brush_picker::settings_toggle(app, ui);
+                    widgets::vline(ui, 22.0);
+                }
+                if matches!(tool, Tool::CloneStamp | Tool::PatternStamp | Tool::HistoryBrush | Tool::Healing | Tool::ArtHistoryBrush) {
+                    let before = app.session.tools.brush.clone();
+                    let mut brush = before.clone();
+                    // Mode is the tool's own brush's, kept per tool like its size.
+                    if let Some(modes) = crate::blend_keys::tool_modes(tool) {
+                        opt_label(ui, tl!("Mode"));
+                        if let Some(Some(m)) = tool_mode_dropdown(ui, "retouch-mode", &modes, Some(crate::blend_keys::brush_tool_mode(tool, brush.mode))) {
+                            brush.mode = m;
+                        }
+                    }
+                    if matches!(tool, Tool::CloneStamp | Tool::HistoryBrush) {
+                        let width = if t.pro { 62.0 } else { 66.0 };
+                        percent_field(ui, tl!("Opacity"), &mut brush.opacity, 1.0..=100.0, width);
+                        percent_field(ui, tl!("Flow"), &mut brush.flow, 1.0..=100.0, width);
+                    }
+                    // Art History has no Mode (the engine paints Normal) and no Flow.
+                    if tool == Tool::ArtHistoryBrush {
+                        let width = if t.pro { 62.0 } else { 66.0 };
+                        percent_field(ui, tl!("Opacity"), &mut brush.opacity, 1.0..=100.0, width);
+                    }
+                    crate::brush_panel::commit_gesture(app, ui.ctx(), &before, &brush);
+                    widgets::vline(ui, 22.0);
+                }
+                if crate::eraser_ui::options_bar(app, ui, tool)
+                    || crate::retouch_ui::options_bar(app, ui, tool)
+                    || crate::vector_ui::options_bar(app, ui, tool)
+                    || crate::analysis_ui::options_bar(app, ui, tool)
+                    || crate::slice_ui::options_bar(app, ui, tool)
+                    || crate::frame_tool::options_bar(app, ui, tool)
+                    || crate::artboard_tool::options_bar(app, ui, tool)
+                {
+                    return;
+                }
+                let brush_before = app.session.tools.brush.clone();
+                let mut brush = brush_before.clone();
+                let b = &mut brush;
+                tool_specific_options(app, ui, t, tool, b);
+                // Painting symmetry is independent of visual theme. Keep the options-bar
+                // action available for Brush, Pencil and Eraser in every palette (#2659).
+                if matches!(tool, Tool::Brush | Tool::Pencil | Tool::Eraser) {
+                    crate::symmetry_ui::menu(app, ui);
+                }
+                crate::brush_panel::commit_gesture(app, ui.ctx(), &brush_before, &brush);
+            });
+            reveal_focused_control(ui);
+        });
+    });
 }
 
 /// The per-tool options of the bar: the brush, mixer, marquee, pencil and view controls.

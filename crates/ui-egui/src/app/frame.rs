@@ -46,6 +46,9 @@ impl PhotocraftApp {
                 *group.shown_mut(&mut self.ui.panels) = false;
             }
         }
+        if chrome.as_ref().is_some_and(|c| c.options_bar == crate::Drawn::ByHost) {
+            self.ui.panels.options_bar = false;
+        }
         self.services.host_chrome = chrome;
     }
 
@@ -351,6 +354,10 @@ impl PhotocraftApp {
             workspace_ui::windows(self, &ctx);
             if self.host_draws(|c| c.dock) {
                 panels::floating_panels(self, &ctx);
+            }
+            // A host-drawn options bar shows on demand, as a card (Window › Options).
+            if chrome && self.host_draws(|c| c.options_bar) {
+                panels::options_card(self, &ctx);
             }
         }
         palette::show(self, &ctx);
