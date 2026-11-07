@@ -92,12 +92,10 @@ pub(super) fn apply(app: &mut PhotocraftApp, drags: &mut Drags, ctx: &egui::Cont
         (Phase::Begin, ..) => Ok(()),
         (Phase::Cancel, ..) => cancel(app, drags, ctx, edit),
         (phase, EditValue::Number(v), OPACITY) => {
-            let v = fraction(*v)?;
-            let ids = drag_targets(app, drags, edit.gesture)?;
-            if phase == Phase::Commit {
-                drags.0.remove(&edit.gesture);
-            }
-            set(app, ctx, &ids, "opacity", json!(v), edit)
+            // A commit ends the drag even when it's refused.
+            let ended = if phase == Phase::Commit { drags.0.remove(&edit.gesture) } else { None };
+            let ids = drag_targets(app, ended.as_ref().or_else(|| drags.0.get(&edit.gesture)))?;
+            set(app, ctx, &ids, "opacity", json!(fraction(*v)?), edit)
         }
         (_, EditValue::Choice(mode), BLEND) => {
             let (_, ids) = targets(active(app)?)?;
@@ -144,9 +142,9 @@ fn begin(app: &PhotocraftApp, drags: &mut Drags, edit: &Edit) -> Result<(), Stri
 /// The layers a drag edits: those fixed at its begin, in the document it began in (another one
 /// active since is refused, so the panel shows the app's value again); a value typed in (a commit
 /// alone) edits the layers selected now.
-fn drag_targets(app: &PhotocraftApp, drags: &Drags, gesture: GestureId) -> Result<Vec<LayerId>, String> {
+fn drag_targets(app: &PhotocraftApp, drag: Option<&Drag>) -> Result<Vec<LayerId>, String> {
     let st = active(app)?;
-    match drags.0.get(&gesture) {
+    match drag {
         Some(drag) if drag.doc != st.doc.id => Err("another document is active since the drag began".into()),
         Some(drag) => Ok(drag.targets.iter().map(|(id, _)| *id).collect()),
         None => targets(st).map(|(_, ids)| ids),
@@ -389,6 +387,21 @@ mod tests {
         assert!(p.apply("opacity", Phase::Change, 6, EditValue::Number(0.2)).is_err());
         assert!(p.apply("opacity", Phase::Commit, 6, EditValue::Number(0.2)).is_err());
         assert_eq!(p.state().revision, revision, "the new document is untouched");
+    }
+
+    /// A commit the app refuses still ends its drag.
+    #[test]
+    fn a_rejected_commit_ends_the_drag() {
+        let mut p = Inspector::new();
+        p.apply("opacity", Phase::Begin, 12, EditValue::Number(1.0)).unwrap();
+        p.apply("opacity", Phase::Change, 12, EditValue::Number(0.5)).unwrap();
+        p.run("file.new", json!({"width": 4, "height": 4}));
+        assert!(p.apply("opacity", Phase::Commit, 12, EditValue::Number(0.2)).is_err());
+        assert!(p.drags.0.is_empty(), "another document");
+        p.new_layer();
+        p.apply("opacity", Phase::Begin, 14, EditValue::Number(1.0)).unwrap();
+        assert!(p.apply("opacity", Phase::Commit, 14, EditValue::Number(f64::NAN)).is_err());
+        assert!(p.drags.0.is_empty(), "not a number");
     }
 
     #[test]
