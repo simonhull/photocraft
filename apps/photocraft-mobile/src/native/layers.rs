@@ -162,10 +162,11 @@ fn set(app: &mut PhotocraftApp, ctx: &egui::Context, ids: &[LayerId], key: &str,
     run(app, ctx, "layer.setProps", params, edit)
 }
 
-/// An abandoned drag. When the latest history step is still the drag's own, take it back,
-/// leaving neither a step to undo nor one to redo (refused when that can't happen now, e.g. while
-/// a job runs, rather than leave a step that changes nothing). Otherwise another step came in
-/// between: put each layer's own opacity back, in one step.
+/// An abandoned drag. When the latest history step is the drag's own, take it back, leaving
+/// neither a step to undo nor one to redo (refused when that can't happen now, e.g. while a job
+/// runs, rather than leave a step that changes nothing). Then put back each layer's own opacity
+/// that still differs, in one step: another step came in mid-drag, so the drag's changes before
+/// it are in a step of their own (all of them, when the other step came last).
 fn cancel(app: &mut PhotocraftApp, drags: &mut Drags, ctx: &egui::Context, edit: &Edit) -> Result<(), String> {
     // Nothing begun here (refused at its begin): nothing to put back.
     let Some(drag) = drags.0.remove(&edit.gesture) else { return Ok(()) };
@@ -174,9 +175,10 @@ fn cancel(app: &mut PhotocraftApp, drags: &mut Drags, ctx: &egui::Context, edit:
         return Err("another document is active since the drag began".into());
     }
     let key = coalesce_key(edit);
-    if st.coalesce.as_deref() == Some(key.as_str()) {
-        return if app.session.rollback() { Ok(()) } else { Err("the drag can't be taken back while a job runs".into()) };
+    if st.coalesce.as_deref() == Some(key.as_str()) && !app.session.rollback() {
+        return Err("the drag can't be taken back while a job runs".into());
     }
+    let st = active(app)?;
     let changed: Vec<(LayerId, f32)> =
         drag.targets.into_iter().filter(|(id, before)| st.doc.layer(*id).is_some_and(|l| (l.opacity - before).abs() > f32::EPSILON)).collect();
     for (id, before) in changed {
@@ -424,6 +426,23 @@ mod tests {
         assert_eq!(p.layer(top).name, "Sky", "the step in between stays");
         p.undo();
         assert!(close(p.opacity(top), 0.5), "putting them back was one step");
+    }
+
+    /// The drag goes 100 → 60, a step from elsewhere (a stroke, a rename) becomes the latest, and the
+    /// drag goes on to 40, which opens a second step under the drag's key. Cancel takes that one back
+    /// and puts the 60 back to 100 too.
+    #[test]
+    fn cancel_after_a_step_from_elsewhere_mid_drag_undoes_the_whole_drag() {
+        let mut p = Inspector::new();
+        let top = p.top;
+        p.apply("opacity", Phase::Begin, 11, EditValue::Number(1.0)).unwrap();
+        p.apply("opacity", Phase::Change, 11, EditValue::Number(0.6)).unwrap();
+        p.run("layer.renameLayer", json!({"layer": top, "name": "Sky"}));
+        p.apply("opacity", Phase::Change, 11, EditValue::Number(0.4)).unwrap();
+        p.apply("opacity", Phase::Cancel, 11, EditValue::Number(1.0)).unwrap();
+        assert!(close(p.opacity(top), 1.0), "back from 60 as well as 40: {}", p.opacity(top));
+        assert_eq!(p.layer(top).name, "Sky", "the step in between stays");
+        assert!(p.drags.0.is_empty());
     }
 
     #[test]
