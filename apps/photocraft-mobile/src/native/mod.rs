@@ -1,12 +1,13 @@
 //! PhotoCraft's native panels (craft-mobile [`ui`](craft_mobile::ui)): described from the session,
-//! edits mapped to engine commands, run as the egui UI runs them ([`menus::invoke`]).
+//! edits mapped to engine commands, run as a menu click runs them ([`menus::invoke_from_host`]:
+//! refused while a dialog or the unsaved-changes prompt holds the app).
 //!
 //! One drag is one undo step: every edit of a gesture carries the same `coalesce` key
 //! ([`coalesce_key`]), which the engine folds into one history step (and one journal entry).
 //! A `begin` applies nothing; the Layers inspector records there which layers the drag edits
 //! ([`Drags`]), so the rest of it can't move to another layer.
 //!
-//! [`menus::invoke`]: photocraft_ui_egui::menus::invoke
+//! [`menus::invoke_from_host`]: photocraft_ui_egui::menus::invoke_from_host
 
 mod brush;
 mod documents;
@@ -131,7 +132,7 @@ fn run(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, mut params: Value
     if let Value::Object(map) = &mut params {
         map.insert("coalesce".into(), Value::String(coalesce_key(edit)));
     }
-    photocraft_ui_egui::menus::invoke(app, ctx, id, params).map(drop)
+    photocraft_ui_egui::menus::invoke_from_host(app, ctx, id, params).map(drop)
 }
 
 /// A slider's value as a 0..=1 fraction: the shell's float may land a hair outside the range,

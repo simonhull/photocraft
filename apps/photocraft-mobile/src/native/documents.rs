@@ -37,7 +37,8 @@ pub(super) fn describe(app: &PhotocraftApp) -> Panel {
 }
 
 /// Make the tapped document active, or close the row's document (through PhotoCraft's
-/// unsaved-changes prompt, as its tab's Close).
+/// unsaved-changes prompt, as its tab's Close). Refused, as menu clicks are, while a dialog or
+/// prompt holds the app.
 pub(super) fn apply(app: &mut PhotocraftApp, ctx: &egui::Context, edit: &Edit) -> Result<(), String> {
     let index = |app: &PhotocraftApp, row: RowId| {
         app.session.documents().iter().position(|st| st.doc.id.0 == row.get()).ok_or_else(|| format!("documents: no document {row}"))
@@ -45,11 +46,11 @@ pub(super) fn apply(app: &mut PhotocraftApp, ctx: &egui::Context, edit: &Edit) -
     match (&edit.value, edit.control.as_str()) {
         (EditValue::Select { row, .. }, ROWS) => {
             let i = index(app, *row)?;
-            photocraft_ui_egui::menus::invoke(app, ctx, &format!("window.document.{i}"), json!({})).map(drop)
+            photocraft_ui_egui::menus::invoke_from_host(app, ctx, &format!("window.document.{i}"), json!({})).map(drop)
         }
         (EditValue::Action { row, action }, ROWS) if action.as_str() == CLOSE => {
             let i = index(app, *row)?;
-            photocraft_ui_egui::menus::invoke(app, ctx, "file.close", json!({"document": i})).map(drop)
+            photocraft_ui_egui::menus::invoke_from_host(app, ctx, "file.close", json!({"document": i})).map(drop)
         }
         (value, control) => Err(format!("documents: `{control}` doesn't take {value:?}")),
     }
@@ -114,6 +115,20 @@ mod tests {
         assert_eq!(ids(&app), [first, second], "unsaved changes: the prompt asks, nothing is closed yet");
         apply(&mut app, &ctx, &close(999)).unwrap_err();
         apply(&mut app, &ctx, &edit(EditValue::Action { row: RowId::from(first), action: "explode".into() })).unwrap_err();
+    }
+
+    /// Under the unsaved-changes prompt the rows are refused, as menu clicks are: no switching or
+    /// closing documents behind it.
+    #[test]
+    fn rows_are_refused_under_the_prompt() {
+        let (mut app, ctx) = (app(), egui::Context::default());
+        let (first, second) = (app.session.documents()[0].doc.id.0, app.session.documents()[1].doc.id.0);
+        app.run("edit.fill", json!({"color": "#ff0000"})).unwrap();
+        apply(&mut app, &ctx, &edit(EditValue::Action { row: RowId::from(second), action: "close".into() })).unwrap();
+        assert!(apply(&mut app, &ctx, &edit(EditValue::Select { row: RowId::from(first), mode: SelectMode::Replace })).is_err());
+        assert_eq!(app.session.active_index(), Some(1), "still the one the prompt asks about");
+        assert!(apply(&mut app, &ctx, &edit(EditValue::Action { row: RowId::from(first), action: "close".into() })).is_err());
+        assert_eq!(app.session.documents().len(), 2);
     }
 
     #[test]

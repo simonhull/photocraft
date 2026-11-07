@@ -77,9 +77,13 @@ pub(crate) fn take(app: &mut PhotocraftApp, said: &mut Said) -> Status {
     }
 }
 
-/// Cancel the job in view: the status's Cancel. `false` when there's none, or it can no longer
-/// stop (a save writing the file says so in the status).
+/// Cancel the job in view: the status's Cancel. `false` when there's none, it can no longer stop
+/// (a save writing the file says so in the status), or a dialog or prompt holds the app.
 pub(crate) fn cancel(app: &mut PhotocraftApp) -> bool {
+    // Refused while a dialog or prompt holds the app, as the menus are.
+    if !photocraft_ui_egui::menus::modal_allows(app, CANCEL) {
+        return false;
+    }
     jobs_ui::job_in_view(app).is_some_and(|job| jobs_ui::cancel(app, job.id))
 }
 
@@ -151,5 +155,18 @@ mod tests {
         assert_eq!(progress["cancel"], CANCEL, "{progress}");
         assert!(progress["label"].as_str().is_some_and(|l| !l.is_empty()), "{progress}");
         assert!(cancel(&mut app), "Cancel stops it");
+    }
+
+    /// Under the unsaved-changes prompt Cancel is refused, as the menus are.
+    #[test]
+    fn cancel_is_refused_under_the_prompt() {
+        let mut app = app();
+        app.background_jobs = true;
+        app.run("file.new", json!({"width": 2048, "height": 2048})).unwrap();
+        app.run("edit.fill", json!({"color": "#ff0000"})).unwrap();
+        jobs_ui::run(&mut app, "filter.blur.gaussianBlur", json!({"radius": 250})).unwrap();
+        photocraft_ui_egui::menus::invoke(&mut app, &egui::Context::default(), "file.close", json!({})).unwrap();
+        assert!(!photocraft_ui_egui::menus::modal_allows(&app, "file.new"), "the prompt is up");
+        assert!(!cancel(&mut app));
     }
 }

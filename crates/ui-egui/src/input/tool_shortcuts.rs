@@ -12,13 +12,13 @@ pub fn id(tool: Tool) -> String {
     format!("tools.select.{name}")
 }
 
-/// Selects `tool` as its [`id`] command does from a menu or a key (the same rules, modal dialogs
-/// included), for a host's own tool picker.
+/// Selects `tool` as its [`id`] command does from a menu click, for a host's own tool picker:
+/// refused while a dialog or prompt holds the app ([`crate::menus::invoke_from_host`]).
 ///
 /// # Errors
-/// The command's refusal, as a message.
+/// The refusal, or the command's own, as a message.
 pub fn select(app: &mut PhotocraftApp, ctx: &egui::Context, tool: Tool) -> Result<(), String> {
-    crate::menus::invoke(app, ctx, &id(tool), serde_json::json!({})).map(drop)
+    crate::menus::invoke_from_host(app, ctx, &id(tool), serde_json::json!({})).map(drop)
 }
 
 /// The tool a [`id`] command selects.
@@ -56,6 +56,21 @@ mod tests {
         assert_eq!(app.ui.tool, Tool::Lasso);
         select(&mut app, &ctx, Tool::Brush).unwrap();
         assert_eq!(app.ui.tool, Tool::Brush);
+    }
+
+    /// Under the unsaved-changes prompt a host's tool picker is refused, as a menu click is.
+    #[test]
+    fn select_is_refused_under_a_prompt() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        let ctx = egui::Context::default();
+        app.run("file.new", json!({"width": 8, "height": 8})).unwrap();
+        app.run("edit.fill", json!({"color": "#ff0000"})).unwrap();
+        crate::menus::invoke(&mut app, &ctx, "file.close", json!({})).unwrap();
+        assert!(app.discard.is_some(), "the prompt is up");
+        let before = app.ui.tool;
+        let other = if before == Tool::Lasso { Tool::Brush } else { Tool::Lasso };
+        assert!(select(&mut app, &ctx, other).is_err());
+        assert_eq!(app.ui.tool, before);
     }
 
     #[test]

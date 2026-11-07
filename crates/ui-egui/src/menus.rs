@@ -44,11 +44,24 @@ use state::{checked, translated_menu_label};
 /// commands also usable through shortcuts. Camera Raw, the SVG editor choice and full-window workspaces
 /// (`distort_ui::modal_workspace`) block menu commands entirely, and a pending crop blocks the
 /// commands Photoshop greys during one (`crop_ui::blocks`).
-pub(crate) fn modal_allows(app: &PhotocraftApp, id: &str) -> bool {
+pub fn modal_allows(app: &PhotocraftApp, id: &str) -> bool {
     if app.camera_raw.is_some() || app.smart_svg.modal_open() || crate::distort_ui::modal_workspace(app).is_some() || crate::crop_ui::blocks(app, id) {
         return false;
     }
     (app.ui.dialogs.is_empty() && app.ui.layers_panel_dialog.is_none() && app.discard.is_none()) || crate::shortcuts::NAV_COMMANDS.contains(&id)
+}
+
+/// Run command `id` for a host app's own control (a native panel, tool rail or status), gated as a
+/// menu click is ([`modal_allows`]): refused while a dialog or the unsaved-changes prompt holds the
+/// app, so a host can't, say, switch tools under the prompt.
+///
+/// # Errors
+/// The refusal, or the command's own error, as a message.
+pub fn invoke_from_host(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: serde_json::Value) -> Result<serde_json::Value, String> {
+    if !modal_allows(app, id) {
+        return Err(format!("`{id}` is unavailable while a dialog is open"));
+    }
+    invoke(app, ctx, id, params)
 }
 
 /// Top-level menus in Photoshop order.
