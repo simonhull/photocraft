@@ -83,7 +83,8 @@ pub(crate) use history::selected_snapshot;
 use info::info_panel;
 pub(crate) use info::{SamplerReadouts, sampler_readouts};
 #[cfg(test)]
-use layer_drag::{background_drop_refused, layer_drop_payload};
+use layer_drag::background_drop_refused;
+pub use layer_drag::layer_drop_payload;
 pub(crate) use layer_drag::{dropped_on, layer_drag_edge_scroll};
 #[cfg(test)]
 pub(crate) use layer_row::thumb_load_badge;

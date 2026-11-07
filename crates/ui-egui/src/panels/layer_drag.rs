@@ -61,9 +61,10 @@ pub(super) fn fx_trash_drop(ui: &egui::Ui, button: &egui::Response, drag: Option
     Some(("layer.layerStyle.clear".into(), params))
 }
 
-/// A drag from within a multi-selection moves the whole selection, not only the grabbed
-/// row. Dragging an unselected row keeps the existing single-layer behavior.
-pub(super) fn layer_drop_payload(dragged: u64, target: LayerId, position: &str, selected: &[LayerId]) -> Value {
+/// `layer.moveTo`'s params for a drop of `dragged` on `target` at `position`: a drag from within
+/// a multi-selection moves the whole selection, not only the grabbed row. Dragging an unselected
+/// row keeps the existing single-layer behavior.
+pub fn layer_drop_payload(dragged: u64, target: LayerId, position: &str, selected: &[LayerId]) -> Value {
     if selected.len() > 1 && selected.contains(&LayerId(dragged)) {
         json!({"layers": selected.iter().map(|id| id.0).collect::<Vec<_>>(), "target": target.0, "position": position})
     } else {
