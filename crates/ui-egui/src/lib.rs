@@ -241,6 +241,7 @@ pub use panels::layers_panel_ui;
 use panels::mask_props_ui;
 pub use panels::mask_thumbs_ui;
 use panels::panel_docking;
+pub use panels::panel_docking::{PanelId, UnknownPanel};
 pub use panels::preset_panels;
 pub use panels::props_layout;
 pub use panels::smart_ui;

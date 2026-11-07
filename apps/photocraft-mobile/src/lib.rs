@@ -391,7 +391,7 @@ impl CraftApp for PhotoCraftMobile {
         }
         services.open_host_panel = features.contains(Feature::Panels).then(|| {
             let shell = self.platform.clone();
-            Box::new(move |id: &str| match native::native_panel(id) {
+            Box::new(move |id: photocraft_ui_egui::PanelId| match native::native_panel(id) {
                 Some(panel) => shell.open_panel(panel),
                 None => log::warn!("photocraft-mobile: no native panel for `{id}`"),
             }) as OpenHostPanelFn

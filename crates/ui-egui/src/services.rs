@@ -470,13 +470,12 @@ pub struct HostChrome {
     /// [`Self::native_panels`] open through [`Services::open_host_panel`]; any other panel opens
     /// as a floating card over the canvas.
     pub dock: Drawn,
-    /// Panel ids (`panel_docking::PANELS`: "layers", "brushes", …) the host draws natively, while
-    /// it draws the dock.
-    pub native_panels: Vec<String>,
+    /// The panels the host draws natively, while it draws the dock.
+    pub native_panels: Vec<crate::PanelId>,
 }
 
-/// Opens one of [`HostChrome::native_panels`] in the host app's own UI, by its panel id.
-pub type OpenHostPanelFn = Box<dyn FnMut(&str)>;
+/// Opens one of [`HostChrome::native_panels`] in the host app's own UI.
+pub type OpenHostPanelFn = Box<dyn FnMut(crate::PanelId)>;
 
 /// Polls the platform's optional WinTab packet queue into the app's stylus feed (Windows), with
 /// whether the app window is focused (to re-assert WinTab overlap priority on activation).

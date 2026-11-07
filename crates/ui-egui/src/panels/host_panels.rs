@@ -25,9 +25,9 @@ fn named_panel(id: &str) -> Option<&'static str> {
     id.strip_prefix("window.toggle.").or_else(|| id.strip_prefix("window.panel.")).and_then(normalize)
 }
 
-/// Whether the host draws panel `id` itself.
-fn native(app: &PhotocraftApp, id: &str) -> bool {
-    app.host_chrome().is_some_and(|chrome| chrome.native_panels.iter().any(|native| native == id))
+/// Panel `id`, when the host draws it itself.
+fn native(app: &PhotocraftApp, id: &str) -> Option<crate::PanelId> {
+    app.host_chrome().and_then(|chrome| chrome.native_panels.iter().copied().find(|native| native.as_str() == id))
 }
 
 /// Panel `id`'s group and its tab there.
@@ -50,7 +50,7 @@ fn floating(app: &PhotocraftApp, id: &str) -> bool {
 /// The panel `group`'s card shows: its selected tab, or its first panel the host doesn't draw.
 /// `None` when the host draws all of them.
 fn card_panel(app: &PhotocraftApp, group: Group) -> Option<&'static str> {
-    let in_group = |p: &&(&'static str, &'static str, Group)| p.2 == group && !native(app, p.0);
+    let in_group = |p: &&(&'static str, &'static str, Group)| p.2 == group && native(app, p.0).is_none();
     let selected = group.tabs(app.ui.theme.is_pro()).get(selected_tab(app, group)).copied();
     PANELS.iter().filter(in_group).find(|p| Some(p.1) == selected).or_else(|| PANELS.iter().find(in_group)).map(|p| p.0)
 }
@@ -71,11 +71,11 @@ pub(crate) fn command(app: &mut PhotocraftApp, id: &str, params: &Value) -> Opti
             None => return Some(Err("show must be a boolean".into())),
         },
     };
-    if native(app, panel) {
+    if let Some(native) = native(app, panel) {
         if show != Some(false)
             && let Some(open) = app.services.open_host_panel.as_mut()
         {
-            open(panel);
+            open(native);
         }
         return Some(Ok(Value::Null));
     }
@@ -96,7 +96,7 @@ pub(crate) fn checked(app: &PhotocraftApp, id: &str) -> Option<bool> {
         return None;
     }
     let panel = named_panel(id)?;
-    Some(!native(app, panel) && floating(app, panel))
+    Some(native(app, panel).is_none() && floating(app, panel))
 }
 
 /// Draws the open panels' cards while the host draws the dock, each stepped from the last; closing

@@ -16,7 +16,7 @@ mod rail;
 pub(crate) mod status;
 
 use craft_mobile::ui::{Edit, Feature, Panel, PanelId, PanelInfo, PanelRole, ShellFeatures};
-use photocraft_ui_egui::{Drawn, HostChrome, PhotocraftApp};
+use photocraft_ui_egui::{Drawn, HostChrome, PanelId as PhotoCraftPanel, PhotocraftApp};
 use serde_json::Value;
 
 pub(crate) use layers::Drags;
@@ -30,15 +30,15 @@ const DOCUMENTS: &str = "documents";
 /// The tool rail's id.
 const TOOLS: &str = "tools";
 
-/// PhotoCraft's own panels the shell draws natively, as (`panel_docking::PANELS` id, native panel
-/// id). The brush popover replaces none of them: it is the brush's settings, not the Brushes
+/// PhotoCraft's own panels the shell draws natively, each with the native panel that stands for
+/// it. The brush popover replaces none of them: it is the brush's settings, not the Brushes
 /// panel's presets.
-const NATIVE_PANELS: [(&str, &str); 1] = [("layers", LAYERS)];
+const NATIVE_PANELS: [(PhotoCraftPanel, &str); 1] = [(PhotoCraftPanel::LAYERS, LAYERS)];
 
-/// The native panel that stands for PhotoCraft's panel `id`, if any: for
+/// The native panel that stands for PhotoCraft's `panel`, if any: for
 /// [`craft_mobile::Platform::open_panel`] when Window › Layers asks for it.
-pub(crate) fn native_panel(id: &str) -> Option<&'static str> {
-    NATIVE_PANELS.iter().find(|(own, _)| *own == id).map(|(_, native)| *native)
+pub(crate) fn native_panel(panel: PhotoCraftPanel) -> Option<&'static str> {
+    NATIVE_PANELS.iter().find(|(own, _)| *own == panel).map(|(_, native)| *native)
 }
 
 /// The parts of PhotoCraft's chrome a shell drawing `features` takes over; `None` for a shell
@@ -57,7 +57,7 @@ pub(crate) fn host_chrome(features: ShellFeatures) -> Option<HostChrome> {
         status_bar: drawn(Feature::Status),
         tabs: panels,
         dock: panels,
-        native_panels: if panels == Drawn::ByHost { NATIVE_PANELS.iter().map(|(own, _)| (*own).to_owned()).collect() } else { Vec::new() },
+        native_panels: if panels == Drawn::ByHost { NATIVE_PANELS.iter().map(|(own, _)| *own).collect() } else { Vec::new() },
     })
 }
 
@@ -190,7 +190,7 @@ mod tests {
                 status_bar: Drawn::ByHost,
                 tabs: Drawn::ByHost,
                 dock: Drawn::ByHost,
-                native_panels: vec!["layers".into()],
+                native_panels: vec![PhotoCraftPanel::LAYERS],
             }
         );
         assert_eq!(host_chrome(ShellFeatures::none()), None, "no features: PhotoCraft draws everything");
@@ -208,11 +208,11 @@ mod tests {
         native.shell(every_feature());
         let offered: Vec<String> = native.panels().into_iter().map(|p| p.id.as_str().to_owned()).collect();
         for id in host_chrome(every_feature()).unwrap().native_panels {
-            let mapped = native_panel(&id).unwrap();
+            let mapped = native_panel(id).unwrap();
             assert!(offered.iter().any(|o| o == mapped), "{id} → {mapped}");
         }
-        assert_eq!(native_panel("brushes"), None, "the brush popover isn't the Brushes panel");
-        assert_eq!(native_panel("color"), None);
+        assert_eq!(native_panel(PhotoCraftPanel::BRUSHES), None, "the brush popover isn't the Brushes panel");
+        assert_eq!(native_panel("color".parse().unwrap()), None);
     }
 
     #[test]

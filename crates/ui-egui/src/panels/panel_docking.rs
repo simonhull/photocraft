@@ -44,6 +44,51 @@ pub(super) const PANELS: &[(&str, &str, Group)] = &[
     ("brushes", "Brushes", Group::Brushes),
 ];
 
+/// One of PhotoCraft's panels by its id (`PANELS`: "layers", "brushes", …), for a host app that
+/// draws some of them itself ([`crate::HostChrome::native_panels`]). Parsed from its id, so an id
+/// PhotoCraft doesn't have is refused where it's written, not ignored where it's used.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct PanelId(&'static str);
+
+impl PanelId {
+    /// The Layers panel.
+    pub const LAYERS: Self = Self("layers");
+    /// The Brushes panel.
+    pub const BRUSHES: Self = Self("brushes");
+
+    /// Its id.
+    pub fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
+impl std::fmt::Display for PanelId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0)
+    }
+}
+
+/// An id that isn't one of PhotoCraft's panels.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UnknownPanel(pub String);
+
+impl std::fmt::Display for UnknownPanel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "`{}` isn't a PhotoCraft panel", self.0)
+    }
+}
+
+impl std::error::Error for UnknownPanel {}
+
+impl std::str::FromStr for PanelId {
+    type Err = UnknownPanel;
+
+    /// The panel with id `s` exactly ("layers", not "Layers").
+    fn from_str(s: &str) -> Result<Self, UnknownPanel> {
+        PANELS.iter().find(|(id, _, _)| *id == s).map(|(id, _, _)| Self(id)).ok_or_else(|| UnknownPanel(s.to_owned()))
+    }
+}
+
 /// PhotoCraft's wording of craft-ui's docking labels, translated through `tl!`. The others keep
 /// craft-ui's English.
 const DOCK_LABELS: &[(&str, &str)] = &[
@@ -849,6 +894,27 @@ pub(super) fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, id: &str) {
         *group.tab_mut(&mut app.ui.dock_tabs) = shown;
     } else if let Some(label) = group.tabs(pro).get(selected) {
         let _ = app.run("window.panel.activate", json!({"panel":label}));
+    }
+}
+
+#[cfg(test)]
+mod panel_id_tests {
+    use super::*;
+
+    #[test]
+    fn a_panel_id_parses_from_its_id_and_refuses_anything_else() {
+        assert_eq!("layers".parse::<PanelId>(), Ok(PanelId::LAYERS));
+        assert_eq!("brushes".parse::<PanelId>().map(PanelId::as_str), Ok("brushes"));
+        assert_eq!("layerComps".parse::<PanelId>().map(|p| p.to_string()), Ok("layerComps".to_owned()));
+        assert_eq!("Layers".parse::<PanelId>(), Err(UnknownPanel("Layers".into())), "the id, not the label");
+        assert_eq!("dock".parse::<PanelId>().unwrap_err().to_string(), "`dock` isn't a PhotoCraft panel");
+    }
+
+    #[test]
+    fn the_named_panels_are_panels() {
+        for panel in [PanelId::LAYERS, PanelId::BRUSHES] {
+            assert_eq!(panel.as_str().parse::<PanelId>(), Ok(panel));
+        }
     }
 }
 

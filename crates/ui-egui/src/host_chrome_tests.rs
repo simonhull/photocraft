@@ -130,7 +130,7 @@ fn all_host_drawn() -> HostChrome {
         status_bar: Drawn::ByHost,
         tabs: Drawn::ByHost,
         dock: Drawn::ByHost,
-        native_panels: vec!["layers".into()],
+        native_panels: vec![crate::PanelId::LAYERS],
     }
 }
 
@@ -140,7 +140,7 @@ fn host_app() -> (Harness<'static, PhotocraftApp>, Rc<RefCell<Vec<String>>>) {
     let opened: Rc<RefCell<Vec<String>>> = Rc::default();
     let record = opened.clone();
     let mut h = app(Some(all_host_drawn()));
-    h.state_mut().services.open_host_panel = Some(Box::new(move |id| record.borrow_mut().push(id.into())));
+    h.state_mut().services.open_host_panel = Some(Box::new(move |id: crate::PanelId| record.borrow_mut().push(id.to_string())));
     (h, opened)
 }
 
