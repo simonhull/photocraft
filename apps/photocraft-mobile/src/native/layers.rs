@@ -49,14 +49,14 @@ pub(super) fn describe(app: &PhotocraftApp) -> Option<Panel> {
     let mut shown = false;
     for (mode, label) in blend_options(!targets.is_empty() && targets_are_groups(doc, &targets), blend) {
         shown |= mode == blend;
-        options.push(ChoiceOption::new(label, label));
+        options.push(ChoiceOption::new(blend_key(mode), label));
     }
     if !shown {
         // A group's Pass Through with a layer selected beside it: shown, as the desktop menu does.
-        options.push(ChoiceOption::new(blend.label(), blend.label()));
+        options.push(ChoiceOption::new(blend_key(blend), blend.label()));
     }
     let mut nodes = Vec::with_capacity(3);
-    if let Ok(choice) = Choice::new(BLEND, "Blend Mode", blend.label(), options) {
+    if let Ok(choice) = Choice::new(BLEND, "Blend Mode", &blend_key(blend), options) {
         nodes.push(Node::Choice(choice.enabled(editable)));
     }
     if let Ok(number) = Number::new(OPACITY, "Opacity", 0.0..=1.0, opacity) {
@@ -97,9 +97,10 @@ pub(super) fn apply(app: &mut PhotocraftApp, drags: &mut Drags, ctx: &egui::Cont
             let ids = drag_targets(app, ended.as_ref().or_else(|| drags.0.get(&edit.gesture)))?;
             set(app, ctx, &ids, "opacity", json!(fraction(*v)?), edit)
         }
-        (_, EditValue::Choice(mode), BLEND) => {
+        (_, EditValue::Choice(id), BLEND) => {
+            let mode = blend_mode(id).ok_or_else(|| format!("layers: no blend mode `{id}`"))?;
             let (_, ids) = targets(active(app)?)?;
-            set(app, ctx, &ids, "blend", json!(mode), edit)
+            set(app, ctx, &ids, "blend", json!(mode.label()), edit)
         }
         (_, EditValue::Select { row }, ROWS) => run(app, ctx, "layer.select", json!({"layer": row}), edit),
         (_, EditValue::SetVisible { row, visible }, ROWS) => run(app, ctx, "layer.setProps", json!({"layer": row, "visible": visible}), edit),
@@ -113,6 +114,24 @@ pub(super) fn apply(app: &mut PhotocraftApp, drags: &mut Drags, ctx: &egui::Cont
         }
         (_, value, control) => Err(format!("layers: `{control}` doesn't take {value:?}")),
     }
+}
+
+/// A blend mode's menu id: the engine's name for it in snake case (`normal`, `color_burn`,
+/// `pass_through`), which `layer.setProps` also takes; stable, unlike the label.
+fn blend_key(mode: BlendMode) -> String {
+    let mut key = String::new();
+    for c in format!("{mode:?}").chars() {
+        if c.is_ascii_uppercase() && !key.is_empty() {
+            key.push('_');
+        }
+        key.push(c.to_ascii_lowercase());
+    }
+    key
+}
+
+/// The blend mode a menu id ([`blend_key`]) names.
+fn blend_mode(id: &str) -> Option<BlendMode> {
+    std::iter::once(BlendMode::PassThrough).chain(BlendMode::layer_modes()).find(|m| blend_key(*m) == id)
 }
 
 /// The active document.
@@ -277,7 +296,7 @@ mod tests {
         let p = Inspector::new();
         let json = p.json();
         assert_eq!(json["nodes"][0]["id"], "blend");
-        assert_eq!(json["nodes"][0]["value"], "Normal");
+        assert_eq!(json["nodes"][0]["value"], "normal");
         assert_eq!(json["nodes"][0]["enabled"], true);
         assert_eq!(json["nodes"][1]["id"], "opacity");
         assert_eq!(json["nodes"][1]["unit"], "percent");
@@ -312,7 +331,7 @@ mod tests {
         let revision = p.state().revision;
         assert!(p.apply("opacity", Phase::Begin, 2, EditValue::Number(1.0)).is_err());
         assert!(p.apply("opacity", Phase::Commit, 2, EditValue::Number(0.5)).is_err());
-        assert!(p.apply("blend", Phase::Commit, 3, EditValue::Choice("Multiply".into())).is_err());
+        assert!(p.apply("blend", Phase::Commit, 3, EditValue::Choice("multiply".into())).is_err());
         assert_eq!(p.state().revision, revision);
         assert!(p.state().doc.is_background(LayerId(background)), "still the Background");
     }
@@ -320,25 +339,41 @@ mod tests {
     #[test]
     fn pass_through_is_offered_when_every_target_is_a_group() {
         let mut p = Inspector::new();
-        assert!(!option_ids(&p.json()["nodes"][0]).contains(&"Pass Through".to_owned()));
+        assert!(!option_ids(&p.json()["nodes"][0]).contains(&"pass_through".to_owned()));
         p.run("layer.new.group", json!({}));
         let json = p.json();
-        assert_eq!(json["nodes"][0]["value"], "Pass Through", "a new group passes through");
-        assert!(option_ids(&json["nodes"][0]).contains(&"Pass Through".to_owned()));
+        assert_eq!(json["nodes"][0]["value"], "pass_through", "a new group passes through");
+        assert!(option_ids(&json["nodes"][0]).contains(&"pass_through".to_owned()));
         // A layer selected beside the group: the menu still shows the group's mode.
         let top = p.top;
         p.select(top, "add");
         p.json();
-        p.apply("blend", Phase::Commit, 1, EditValue::Choice("Normal".into())).unwrap();
+        p.apply("blend", Phase::Commit, 1, EditValue::Choice("normal".into())).unwrap();
     }
 
-    /// The menu's ids are what `layer.setProps` takes.
+    fn option_labels(node: &Value) -> Vec<String> {
+        node["options"].as_array().unwrap().iter().map(|o| o["label"].as_str().unwrap().to_owned()).collect()
+    }
+
+    /// The menu's ids are the modes' stable keys, its labels what the user reads, and picking any
+    /// option sets that mode.
     #[test]
-    fn every_blend_option_is_a_mode_the_engine_takes() {
-        let p = Inspector::new();
-        for id in option_ids(&p.json()["nodes"][0]) {
-            assert_eq!(photocraft_engine::commands::blend_from_str(&id).unwrap().label(), id);
+    fn every_blend_option_round_trips_through_its_key() {
+        let mut p = Inspector::new();
+        p.run("layer.new.group", json!({}));
+        let json = p.json();
+        let (ids, labels) = (option_ids(&json["nodes"][0]), option_labels(&json["nodes"][0]));
+        assert_eq!(json["nodes"][0]["value"], "pass_through");
+        assert_eq!((ids.first().unwrap().as_str(), labels.first().unwrap().as_str()), ("pass_through", "Pass Through"));
+        assert!(ids.contains(&"multiply".to_owned()) && ids.contains(&"color_burn".to_owned()), "{ids:?}");
+        let group = p.state().active_layer.unwrap().0;
+        for (n, (id, label)) in ids.iter().zip(&labels).enumerate() {
+            let mode = blend_mode(id).unwrap();
+            assert_eq!((blend_key(mode).as_str(), mode.label()), (id.as_str(), label.as_str()));
+            p.apply("blend", Phase::Commit, 100 + n as u64, EditValue::Choice(id.clone())).unwrap();
+            assert_eq!(p.layer(group).blend, mode, "{id}");
         }
+        assert!(blend_mode("Multiply").is_none(), "a label isn't an id");
     }
 
     #[test]
@@ -483,7 +518,7 @@ mod tests {
         assert!(close(p.opacity(background), 1.0) && p.state().doc.is_background(LayerId(background)), "the Background stays out");
         p.undo();
         assert!(close(p.opacity(top), 1.0) && close(p.opacity(other), 1.0), "one step");
-        p.apply("blend", Phase::Commit, 9, EditValue::Choice("Screen".into())).unwrap();
+        p.apply("blend", Phase::Commit, 9, EditValue::Choice("screen".into())).unwrap();
         assert_eq!((p.layer(top).blend, p.layer(other).blend, p.layer(background).blend), (BlendMode::Screen, BlendMode::Screen, BlendMode::Normal));
     }
 
@@ -491,7 +526,7 @@ mod tests {
     fn blend_visibility_rename_and_select_apply() {
         let mut p = Inspector::new();
         let top = p.top;
-        p.apply("blend", Phase::Commit, 1, EditValue::Choice("Multiply".into())).unwrap();
+        p.apply("blend", Phase::Commit, 1, EditValue::Choice("multiply".into())).unwrap();
         p.apply("rows", Phase::Commit, 2, EditValue::SetVisible { row: top.into(), visible: false }).unwrap();
         p.apply("rows", Phase::Commit, 3, EditValue::Rename { row: top.into(), name: "Sky".into() }).unwrap();
         let l = p.layer(top);
@@ -516,6 +551,7 @@ mod tests {
         let mut p = Inspector::new();
         let before = p.state().revision;
         assert!(p.apply("blend", Phase::Commit, 1, EditValue::Choice("nonsense".into())).is_err());
+        assert!(p.apply("blend", Phase::Commit, 4, EditValue::Choice("Multiply".into())).is_err(), "a label, not an id");
         assert!(p.apply("opacity", Phase::Commit, 2, EditValue::Toggle(true)).is_err());
         assert!(p.apply("opacity", Phase::Commit, 3, EditValue::Number(f64::NAN)).is_err());
         assert_eq!(p.state().revision, before);
