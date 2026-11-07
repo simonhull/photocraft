@@ -1,6 +1,8 @@
 //! The Layers inspector: the blend mode and opacity of the selected layers (showing the active
 //! layer's), then the layers, top first.
 //!
+//! Each row's context menu has Duplicate and Delete (a swipe too) for that layer alone.
+//!
 //! As in the desktop Layers panel ([`prop_targets`]): with several layers selected, blend mode and
 //! Opacity change every one of them but the Background; the Background alone has neither (both
 //! greyed out, and refused: setting one would turn it into Layer 0); Pass Through is offered
@@ -8,7 +10,9 @@
 
 use std::collections::HashMap;
 
-use craft_mobile::ui::{Choice, ChoiceOption, Edit, EditValue, GestureId, ItemList, Node, Number, Panel, PanelRole, Phase, Position, Row, SelectMode, Unit};
+use craft_mobile::ui::{
+    Choice, ChoiceOption, Edit, EditValue, GestureId, ItemList, Node, Number, Panel, PanelRole, Phase, Position, Row, RowAction, SelectMode, Unit,
+};
 use photocraft_color::BlendMode;
 use photocraft_doc::{DocId, Layer, LayerContent, LayerId};
 use photocraft_engine::DocState;
@@ -24,6 +28,10 @@ const BLEND: &str = "blend";
 const OPACITY: &str = "opacity";
 /// The layer rows.
 const ROWS: &str = "rows";
+/// A row's Duplicate: a copy of that layer (`layer.duplicate`).
+const DUPLICATE: &str = "duplicate";
+/// A row's Delete: that layer (`layer.delete`).
+const DELETE: &str = "delete";
 
 /// One Opacity drag, fixed at its `begin`: the document and layers it edits, each with its
 /// opacity from before the drag. Selecting another layer mid-drag doesn't move the drag there.
@@ -77,7 +85,11 @@ fn push_rows(layers: &[Layer], depth: u32, selected: &dyn Fn(LayerId) -> bool, o
                 .subtitle(layer.content.kind_name())
                 .depth(depth)
                 .visible(Some(layer.visible))
-                .selected(selected(layer.id)),
+                .selected(selected(layer.id))
+                .actions(vec![
+                    RowAction::new(DUPLICATE, "Duplicate").icon(Some("plus.square.on.square")),
+                    RowAction::new(DELETE, "Delete").icon(Some("trash")).destructive(true),
+                ]),
         );
         if let LayerContent::Group(group) = &layer.content {
             push_rows(&group.children, depth + 1, selected, out);
@@ -122,6 +134,9 @@ pub(super) fn apply(app: &mut PhotocraftApp, drags: &mut Drags, ctx: &egui::Cont
             let selected = active(app)?.selected_layers();
             run(app, ctx, "layer.moveTo", layer_drop_payload(row.get(), LayerId(target.get()), position, &selected), edit)
         }
+        // The row's layer alone, whatever is selected, as the row's menu says.
+        (_, EditValue::Action { row, action }, ROWS) if action.as_str() == DUPLICATE => run(app, ctx, "layer.duplicate", json!({"layer": row}), edit),
+        (_, EditValue::Action { row, action }, ROWS) if action.as_str() == DELETE => run(app, ctx, "layer.delete", json!({"layer": row}), edit),
         (_, value, control) => Err(format!("layers: `{control}` doesn't take {value:?}")),
     }
 }
@@ -602,6 +617,36 @@ mod tests {
         p.apply("rows", Phase::Commit, 1, EditValue::Move { row: third.into(), target: top.into(), position: Position::Below }).unwrap();
         let order: Vec<u64> = p.state().doc.layers.iter().map(|l| l.id.0).collect();
         assert_eq!(order, [p.background(), third, top], "bottom first");
+    }
+
+    /// Every row offers Duplicate and Delete (destructive), and the row's action acts on that layer
+    /// alone, in one undo step each, whatever is selected.
+    #[test]
+    fn rows_duplicate_and_delete_their_layer() {
+        let mut p = Inspector::new();
+        let (top, background) = (p.top, p.background());
+        let json = p.json();
+        for row in json["nodes"][2]["rows"].as_array().unwrap() {
+            assert_eq!(
+                row["actions"].as_array().map(|a| a.iter().map(|x| (x["id"].clone(), x["destructive"].clone())).collect::<Vec<_>>()),
+                Some(vec![(json!("duplicate"), json!(false)), (json!("delete"), json!(true))]),
+                "{row}"
+            );
+        }
+        let action = |action: &str| EditValue::Action { row: top.into(), action: action.into() };
+        let count = |p: &Inspector| p.state().doc.layers.len();
+        p.select(background, "replace");
+        p.apply("rows", Phase::Commit, 1, action("duplicate")).unwrap();
+        assert_eq!(count(&p), 3, "a copy of the row's layer");
+        assert!(p.state().doc.layers.iter().any(|l| l.id.0 == top), "the original stays");
+        p.undo();
+        assert_eq!(count(&p), 2, "one step");
+        p.select(background, "replace");
+        p.apply("rows", Phase::Commit, 2, action("delete")).unwrap();
+        assert_eq!(p.state().doc.layers.iter().map(|l| l.id.0).collect::<Vec<_>>(), [background], "the row's layer, not the selected one");
+        p.undo();
+        assert_eq!(count(&p), 2, "one step");
+        assert!(p.apply("rows", Phase::Commit, 3, action("explode")).is_err());
     }
 
     #[test]
