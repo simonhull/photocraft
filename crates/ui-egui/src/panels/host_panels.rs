@@ -3,8 +3,9 @@
 //! opens as a floating card over the canvas.
 //!
 //! A card stands for its dock group (Color | Swatches | …) and shows one of its panels: the
-//! group's `ui.panels` flag says whether it's open and its `dock_tabs` entry which panel it shows,
-//! so Window › Swatches turns the Color card to Swatches. Closing the card clears the flag.
+//! group's `ui.panels` flag says whether it's open and the host's card tabs
+//! ([`PhotocraftApp::host_card_tabs`], not the remembered `dock_tabs`) which panel it shows, so
+//! Window › Swatches turns the Color card to Swatches. Closing the card clears the flag.
 
 use serde_json::Value;
 
@@ -37,9 +38,10 @@ fn place(app: &PhotocraftApp, id: &str) -> Option<(Group, usize)> {
     Some((*group, tab))
 }
 
-/// The tab `group`'s card shows.
+/// The tab `group`'s card shows: the host's choice ([`PhotocraftApp::host_card_tabs`]), never the
+/// dock's remembered one.
 fn selected_tab(app: &PhotocraftApp, group: Group) -> usize {
-    group.tab(&app.ui.dock_tabs)
+    group.tab(app.host_card_tabs().unwrap_or(&app.ui.dock_tabs))
 }
 
 /// Whether panel `id` shows in an open card.
@@ -82,8 +84,8 @@ pub(crate) fn command(app: &mut PhotocraftApp, id: &str, params: &Value) -> Opti
     let (group, tab) = place(app, panel)?;
     let show = show.unwrap_or_else(|| !floating(app, panel));
     *group.shown_mut(&mut app.ui.panels) = show;
-    if show {
-        *group.tab_mut(&mut app.ui.dock_tabs) = tab;
+    if show && let Some(tabs) = app.host_card_tabs_mut() {
+        *group.tab_mut(tabs) = tab;
     }
     Some(Ok(Value::Null))
 }
@@ -107,9 +109,9 @@ pub(crate) fn floating_panels(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let open: Vec<(Group, &'static str)> =
         Group::ALL.into_iter().filter(|group| group.shown(&app.ui.panels)).filter_map(|group| Some((group, card_panel(app, group)?))).collect();
     for (step, (group, panel)) in (0u8..).zip(open) {
-        let (Some((_, label, _)), Some((_, tab))) = (PANELS.iter().find(|p| p.0 == panel), place(app, panel)) else { continue };
-        // The card shows the panel its group has selected, as the dock would.
-        *group.tab_mut(&mut app.ui.dock_tabs) = tab;
+        // The panel its group's card has selected, or its first the host doesn't draw; the
+        // fallback stays the card's, never written back as the group's choice.
+        let Some((_, label, _)) = PANELS.iter().find(|p| p.0 == panel) else { continue };
         let inset = 16.0 + CARD_STEP * f32::from(step);
         let top = canvas.top() + inset + if options_card { OPTIONS_CARD_ROOM } else { 0.0 };
         let card = FloatCard {

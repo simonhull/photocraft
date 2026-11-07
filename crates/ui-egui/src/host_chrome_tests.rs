@@ -224,6 +224,20 @@ fn a_panel_of_an_open_card_turns_the_card_to_it() {
     assert_eq!(cards(&h), ["History", "Swatches"]);
 }
 
+/// The cards' tabs are the host's: turning a card, or a card falling back to a panel the host
+/// doesn't draw (Channels for Layers), never reaches the dock's tabs the preferences remember.
+#[test]
+fn the_cards_tabs_never_reach_the_remembered_dock_tabs() {
+    let (mut h, _) = host_app();
+    let before = (h.state().ui.dock_tabs, crate::dock::snapshot(h.state())["dockTabs"].clone());
+    run(&mut h, "window.toggle.color");
+    run(&mut h, "window.panel.swatches");
+    run(&mut h, "window.panel.channels");
+    h.run_steps(4);
+    assert_eq!(cards(&h), ["Channels", "Swatches"]);
+    assert_eq!((h.state().ui.dock_tabs, crate::dock::snapshot(h.state())["dockTabs"].clone()), before);
+}
+
 #[test]
 fn a_native_panel_opens_through_the_host_and_leaves_its_flag_alone() {
     let (mut h, opened) = host_app();

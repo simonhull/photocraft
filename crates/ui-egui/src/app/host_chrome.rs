@@ -9,7 +9,7 @@
 use std::borrow::Cow;
 
 use crate::dock::Group;
-use crate::state::Panels;
+use crate::state::{DockTabs, Panels};
 use crate::{Drawn, HostChrome, PhotocraftApp};
 
 /// The flags of the parts that open on demand while host-drawn: the dock groups' and the
@@ -57,6 +57,9 @@ pub(crate) struct HostState {
     before: OnDemand,
     /// What Tab hid, so a second Tab brings back just those cards.
     hidden_by_tab: Option<OnDemand>,
+    /// The panel each group's card shows, from the dock's at the takeover: the host's own, so
+    /// turning a card never changes the dock tabs the preferences remember.
+    card_tabs: DockTabs,
 }
 
 impl PhotocraftApp {
@@ -81,8 +84,18 @@ impl PhotocraftApp {
         self.host = chrome.map(|chrome| {
             let before = OnDemand::of(&self.ui.panels);
             OnDemand::CLOSED.apply(&chrome, &mut self.ui.panels);
-            HostState { chrome, before, hidden_by_tab: None }
+            HostState { chrome, before, hidden_by_tab: None, card_tabs: self.ui.dock_tabs }
         });
+    }
+
+    /// The panel each card shows, in host mode (`dock_tabs`' shape, but the host's own).
+    pub(crate) fn host_card_tabs(&self) -> Option<&DockTabs> {
+        self.host.as_ref().map(|host| &host.card_tabs)
+    }
+
+    /// [`Self::host_card_tabs`], to turn a card.
+    pub(crate) fn host_card_tabs_mut(&mut self) -> Option<&mut DockTabs> {
+        self.host.as_mut().map(|host| &mut host.card_tabs)
     }
 
     /// Whether the host app draws `part` of the chrome itself, so PhotoCraft leaves it out.
