@@ -99,8 +99,8 @@ pub struct PhotoCraftMobile {
     menu_events: native::menu::MenuEvents,
     /// The status last sent to the shell.
     status: native::status::Sent<Status>,
-    /// The status messages sent to the shell so far, which numbers them.
-    said: u64,
+    /// The status message standing, and how many have been said, which numbers them.
+    said: native::status::Said,
 }
 
 /// PhotoCraft's own copy's pixels for the clipboard service: see [`PhotoCraftMobile::own_copy`].
@@ -284,7 +284,7 @@ impl CraftApp for PhotoCraftMobile {
             native: native::Native::default(),
             menu_events: native::menu::MenuEvents::default(),
             status: native::status::Sent::default(),
-            said: 0,
+            said: native::status::Said::default(),
         }
     }
 
@@ -1289,14 +1289,15 @@ mod tests {
     fn the_status_goes_to_a_shell_that_shows_it() {
         let mut h = Hosted::new();
         h.frame(|app, _| app.app.ui.status = "Saved a.psd".into());
-        assert!(!h.app.app.ui.status.is_empty() && h.app.said == 0, "no Status feature: the status bar's");
+        assert!(!h.app.app.ui.status.is_empty() && h.app.said.count() == 0, "no Status feature: the status bar's");
         let mut h = Hosted::new();
         h.shell(ShellFeatures::from([Feature::Status]));
-        let before = h.app.said;
+        let before = h.app.said.count();
         h.frame(|app, _| app.app.ui.status = "Saved a.psd".into());
         assert!(h.app.app.ui.status.is_empty(), "the shell's now");
+        h.frame(|_, _| {});
         h.frame(|app, _| app.app.ui.status = "Saved a.psd".into());
-        assert!(h.app.said >= before + 2, "said twice");
+        assert!(h.app.said.count() >= before + 2, "said twice");
     }
 
     /// The panel lists layers top first, children under their group, as the desktop panel does.
