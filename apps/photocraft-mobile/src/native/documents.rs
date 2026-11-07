@@ -3,9 +3,10 @@
 //!
 //! A row is a document by its id, so a row stays its document while others open and close; a tap
 //! makes it active, as Window › <document> does, and its Close (the row's context menu, or a
-//! swipe) closes it, as its tab's Close does: a document with unsaved changes asks first.
+//! swipe) closes it, as its tab's Close does: a document with unsaved changes asks first. A row
+//! offers no Rename: a document's name is its file's.
 
-use craft_mobile::ui::{Edit, EditValue, ItemList, Node, Panel, PanelRole, Row, RowAction, RowId};
+use craft_mobile::ui::{Edit, EditValue, ItemList, Node, Panel, PanelRole, Rename, Row, RowAction, RowId};
 use photocraft_ui_egui::PhotocraftApp;
 use serde_json::json;
 
@@ -27,6 +28,8 @@ pub(super) fn describe(app: &PhotocraftApp) -> Panel {
             Row::new(st.doc.id.0, st.doc.name.as_str())
                 .subtitle(subtitle)
                 .selected(active == Some(i))
+                // Its name is its file's: Save As renames it, not the panel.
+                .rename(Rename::No)
                 .actions(vec![RowAction::new(CLOSE, "Close").icon(Some("xmark")).destructive(true)])
         })
         .collect();
@@ -94,6 +97,7 @@ mod tests {
         assert_eq!(rows[1]["subtitle"], "Edited · 16 × 4 px", "unsaved changes say so");
         for row in &rows {
             assert_eq!(row["actions"], json!([{"id": "close", "label": "Close", "icon": "xmark", "destructive": true}]), "each can be closed");
+            assert_eq!(row["rename"], "no", "a document is renamed by saving it under another name");
         }
     }
 
