@@ -1,9 +1,12 @@
 //! Host chrome (`Services::host_chrome`): a part the host app draws itself is left out, and the
 //! canvas takes its room; the default leaves everything to PhotoCraft.
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use egui::Rect;
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use serde_json::json;
 
 use crate::theme::ThemeKind;
@@ -18,9 +21,9 @@ fn app(chrome: Option<HostChrome>) -> Harness<'static, PhotocraftApp> {
     s.edit_prefs(|p| p.general.auto_show_home_screen = false);
     let mut h = Harness::builder().with_size(SIZE).with_max_steps(64).build_eframe(move |cc| {
         PhotocraftApp::setup_context(&cc.egui_ctx, ThemeKind::Pro);
-        let services = crate::Services { host_chrome: chrome, ..Default::default() };
-        let mut app = PhotocraftApp::new(s, services);
+        let mut app = PhotocraftApp::new(s, crate::Services::default());
         app.ui.theme = ThemeKind::Pro;
+        app.set_host_chrome(chrome);
         app
     });
     h.run_steps(6);
@@ -103,6 +106,7 @@ fn with_all_the_chrome_host_drawn_the_canvas_fills_the_window() {
         status_bar: Drawn::ByHost,
         tabs: Drawn::ByHost,
         dock: Drawn::ByHost,
+        native_panels: Vec::new(),
     };
     let h = app(Some(all));
     let r = canvas(&h);
@@ -110,4 +114,121 @@ fn with_all_the_chrome_host_drawn_the_canvas_fills_the_window() {
     for label in [TOOLBAR, OPTIONS, STATUS, DOCK] {
         assert!(!shows(&h, label), "{label} isn't drawn");
     }
+}
+
+// ------------------------------------------------------------------ host panels and floating cards
+
+/// Every part host-drawn, so the only cards and Close buttons are the floating panels'.
+fn all_host_drawn() -> HostChrome {
+    HostChrome {
+        menus: Drawn::ByHost,
+        toolbar: Drawn::ByHost,
+        options_bar: Drawn::ByHost,
+        status_bar: Drawn::ByHost,
+        tabs: Drawn::ByHost,
+        dock: Drawn::ByHost,
+        native_panels: vec!["layers".into()],
+    }
+}
+
+/// The app with all the chrome host-drawn and Layers native, recording the panels the host is
+/// asked to open; no panel open to start with.
+fn host_app() -> (Harness<'static, PhotocraftApp>, Rc<RefCell<Vec<String>>>) {
+    let opened: Rc<RefCell<Vec<String>>> = Rc::default();
+    let record = opened.clone();
+    let mut h = app(Some(all_host_drawn()));
+    h.state_mut().services.open_host_panel = Some(Box::new(move |id| record.borrow_mut().push(id.into())));
+    (h, opened)
+}
+
+fn run(h: &mut Harness<'static, PhotocraftApp>, id: &str) {
+    let ctx = h.ctx.clone();
+    crate::menus::invoke(h.state_mut(), &ctx, id, json!({})).unwrap();
+    h.run_steps(4);
+}
+
+/// The titles of the open cards: each card has a Close button, and its title is the label on its row.
+fn cards(h: &Harness<'static, PhotocraftApp>) -> Vec<String> {
+    let closes: Vec<Rect> = h.query_all_by_label("Close").map(|node| node.rect()).collect();
+    let mut titles: Vec<String> = closes
+        .iter()
+        .filter_map(|close| {
+            h.query_all_by_role(egui::accesskit::Role::Label)
+                .filter(|node| (close.top()..=close.bottom()).contains(&node.rect().center().y) && node.rect().right() < close.left())
+                .find_map(|node| {
+                    let a = node.accesskit_node();
+                    a.label().or_else(|| a.value()).map(|text| text.to_string())
+                })
+        })
+        .collect();
+    titles.sort();
+    titles
+}
+
+fn menu_checked(h: &Harness<'static, PhotocraftApp>, id: &str) -> Option<bool> {
+    crate::menus::menu_items(h.state()).into_iter().find(|item| item.id == id).and_then(|item| item.checked)
+}
+
+#[test]
+fn setting_a_host_drawn_dock_closes_the_panels() {
+    let (h, _) = host_app();
+    assert!(cards(&h).is_empty(), "{:?}", cards(&h));
+    assert!(!h.state().ui.panels.color && !h.state().ui.panels.properties);
+}
+
+#[test]
+fn window_color_floats_a_color_card_and_toggling_it_again_closes_it() {
+    let (mut h, _) = host_app();
+    run(&mut h, "window.toggle.color");
+    assert_eq!(cards(&h), ["Color"]);
+    assert!(h.state().ui.panels.color);
+    run(&mut h, "window.toggle.color");
+    assert!(cards(&h).is_empty(), "{:?}", cards(&h));
+    assert!(!h.state().ui.panels.color);
+}
+
+#[test]
+fn closing_the_card_clears_its_flag() {
+    let (mut h, _) = host_app();
+    run(&mut h, "window.toggle.color");
+    h.get_by_label("Close").click();
+    h.run_steps(4);
+    assert!(!h.state().ui.panels.color);
+    assert!(cards(&h).is_empty(), "{:?}", cards(&h));
+}
+
+#[test]
+fn a_panel_of_an_open_card_turns_the_card_to_it() {
+    let (mut h, _) = host_app();
+    run(&mut h, "window.toggle.color");
+    run(&mut h, "window.panel.swatches");
+    assert_eq!(cards(&h), ["Swatches"]);
+    run(&mut h, "window.toggle.history");
+    assert_eq!(cards(&h), ["History", "Swatches"]);
+}
+
+#[test]
+fn a_native_panel_opens_through_the_host_and_leaves_its_flag_alone() {
+    let (mut h, opened) = host_app();
+    run(&mut h, "window.toggle.layers");
+    run(&mut h, "window.panel.layers");
+    assert_eq!(*opened.borrow(), ["layers", "layers"]);
+    assert!(!h.state().ui.panels.layers);
+    assert!(cards(&h).is_empty(), "{:?}", cards(&h));
+    // Channels shares the Layers group but isn't native: it floats, in a card of its own.
+    run(&mut h, "window.panel.channels");
+    assert_eq!(cards(&h), ["Channels"]);
+    assert_eq!(opened.borrow().len(), 2);
+}
+
+#[test]
+fn floating_panels_are_checked_and_native_ones_never() {
+    let (mut h, _) = host_app();
+    assert_eq!(menu_checked(&h, "window.panel.color"), Some(false));
+    run(&mut h, "window.toggle.color");
+    assert_eq!(menu_checked(&h, "window.panel.color"), Some(true));
+    assert_eq!(menu_checked(&h, "window.panel.swatches"), Some(false), "the card shows Color, not Swatches");
+    run(&mut h, "window.toggle.layers");
+    h.state_mut().ui.panels.layers = true;
+    assert_eq!(menu_checked(&h, "window.panel.layers"), Some(false), "the host knows what it shows");
 }

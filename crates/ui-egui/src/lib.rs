@@ -260,9 +260,9 @@ pub use services::{
     AdoptAutosaveFn, AppendTextFn, AutomationCommandFn, AutomationOpenPcraftFn, AutomationReadFn, AutomationWriteFn, AutosaveFn, AutosaveResultsFn, CapsLockFn,
     CaptionStyleFn, ClipboardGetFn, ClipboardGetSvgFn, ClipboardSetFn, ClipboardUnreadableFn, CursorPosFn, DiscardAutosaveFn, Drawn, EncodePngFn, ExportFn,
     ExportSettings, ExternalSvgEditor, ExternalSvgSession, ExternalVectorSave, ExternalVectorSource, FileStamp, FileStampFn, FormatChoices, HostChrome,
-    HostEnabledFn, HostMenu, HostMenuItem, HostRunFn, ImportFn, Inbox, LoadTextFn, OpenExternalSvgFn, OpenUrlFn, OsEventsFn, PhotoshopShortcutsFn, PlaceInbox,
-    QuitFn, RecoverFn, Recoverable, RightButtonDownFn, SameFileFn, SaveFileFn, SaveTextFn, Services, SystemThemeFn, TabletPollFn, WindowFrameFn, WriteFn,
-    WritePendingFn,
+    HostEnabledFn, HostMenu, HostMenuItem, HostRunFn, ImportFn, Inbox, LoadTextFn, OpenExternalSvgFn, OpenHostPanelFn, OpenUrlFn, OsEventsFn,
+    PhotoshopShortcutsFn, PlaceInbox, QuitFn, RecoverFn, Recoverable, RightButtonDownFn, SameFileFn, SaveFileFn, SaveTextFn, Services, SystemThemeFn,
+    TabletPollFn, WindowFrameFn, WriteFn, WritePendingFn,
 };
 pub use text::bidi_text;
 pub use text::cjk_fonts;

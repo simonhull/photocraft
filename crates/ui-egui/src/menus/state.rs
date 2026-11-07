@@ -123,6 +123,9 @@ const MODE_CHECKS: [&str; 11] = ["rgb", "grayscale", "cmyk", "lab", "multichanne
 
 /// Is a UI-level panel toggle currently on (for checkmarks)?
 pub(super) fn checked(app: &PhotocraftApp, id: &str) -> Option<bool> {
+    if let Some(checked) = crate::panels::host_panel_checked(app, id) {
+        return Some(checked);
+    }
     if let Some(checked) = crate::panel_docking::checked(app, id) {
         return Some(checked);
     }

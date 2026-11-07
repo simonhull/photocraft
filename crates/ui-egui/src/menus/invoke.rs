@@ -108,6 +108,10 @@ fn invoke_early_commands(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str,
         crate::canvas::commit_crop(app);
         return Some(Ok(json!({"committed": true})));
     }
+    // With the dock host-drawn, panels open in the host's UI or as floating cards.
+    if let Some(result) = crate::panels::host_panel_command(app, id, params) {
+        return Some(result);
+    }
     if let Some(result) = crate::panel_docking::command(app, id, params) {
         return Some(result);
     }

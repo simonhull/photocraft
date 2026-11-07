@@ -465,9 +465,17 @@ pub struct HostChrome {
     pub status_bar: Drawn,
     /// The document tabs (the host offers its own document switcher).
     pub tabs: Drawn,
-    /// The panel dock: the canvas fills the window, on the pasteboard colour.
+    /// The panel dock: the canvas fills the window, on the pasteboard colour. Panels in
+    /// [`Self::native_panels`] open through [`Services::open_host_panel`]; any other panel opens
+    /// as a floating card over the canvas.
     pub dock: Drawn,
+    /// Panel ids (`panel_docking::PANELS`: "layers", "brushes", …) the host draws natively, while
+    /// it draws the dock.
+    pub native_panels: Vec<String>,
 }
+
+/// Opens one of [`HostChrome::native_panels`] in the host app's own UI, by its panel id.
+pub type OpenHostPanelFn = Box<dyn FnMut(&str)>;
 
 /// Polls the platform's optional WinTab packet queue into the app's stylus feed (Windows), with
 /// whether the app window is focused (to re-assert WinTab overlap priority on activation).
@@ -635,4 +643,7 @@ pub struct Services {
     pub host_menu: Option<HostMenu>,
     /// The parts of the chrome the host app draws itself (a tablet shell); `None` draws them all.
     pub host_chrome: Option<HostChrome>,
+    /// Opens a panel the host draws natively ([`HostChrome::native_panels`]): Window › Layers and
+    /// the panel's other toggles call it instead of showing PhotoCraft's own.
+    pub open_host_panel: Option<OpenHostPanelFn>,
 }

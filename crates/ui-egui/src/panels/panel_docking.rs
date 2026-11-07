@@ -22,7 +22,8 @@ pub(crate) type Workspace = craft_ui::docking::Workspace<String>;
 
 type Returns = std::collections::BTreeMap<String, Location<String>>;
 
-const PANELS: &[(&str, &str, Group)] = &[
+/// The panels: id, English label and dock group.
+pub(super) const PANELS: &[(&str, &str, Group)] = &[
     ("color", "Color", Group::Color),
     ("swatches", "Swatches", Group::Color),
     ("gradients", "Gradients", Group::Color),
@@ -823,7 +824,8 @@ fn fillers(layout: &Layout<String>) -> std::collections::HashSet<String> {
     out
 }
 
-fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, id: &str) {
+/// Draws panel `id`'s body, as its dock group would with the panel's tab selected.
+pub(super) fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, id: &str) {
     let Some((_, label, group)) = PANELS.iter().find(|p| p.0 == id) else { return };
     let pro = crate::theme::Tokens::get(ui.ctx()).pro;
     let Some(tab) = group.tabs(pro).iter().position(|name| name == label) else { return };

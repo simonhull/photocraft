@@ -1,6 +1,8 @@
+use crate::panels::float_card::{CardSize, FloatCard, Header};
+
 use super::{
-    Align2, Color32, CornerRadius, Ev, FontId, GroupView, ItemView, PhotocraftApp, Place, Pos2, Rect, Sense, Stroke, TextureHandle, Tokens, Tool, Value,
-    browser, canvas_drop_rect, empty, generic, json, paint_gradient, pattern_texture, pos2, run, shape_texture, style_texture, vec2,
+    Align2, Color32, Ev, FontId, GroupView, ItemView, PhotocraftApp, Place, Pos2, Rect, Sense, Stroke, TextureHandle, Tokens, Tool, Value, browser,
+    canvas_drop_rect, empty, generic, json, paint_gradient, pattern_texture, pos2, run, shape_texture, style_texture, vec2,
 };
 
 // ------------------------------------------------------------------ Gradients
@@ -114,45 +116,25 @@ fn float_window(
     offset: f32,
     body: impl FnOnce(&mut PhotocraftApp, &mut egui::Ui),
 ) -> bool {
-    let t = Tokens::get(ctx);
-    let frame = egui::Frame::NONE
-        .fill(t.card)
-        .stroke(Stroke::new(1.0, t.card_border))
-        .corner_radius(CornerRadius::same(t.radius_lg as u8))
-        .shadow(egui::Shadow { offset: [0, 10], blur: 30, spread: 0, color: t.shadow })
-        .inner_margin(egui::Margin::same(8));
     let canvas = canvas_drop_rect(app);
-    let mut close = false;
-    egui::Window::new(title)
-        .id(egui::Id::unique(("preset-window", key)))
-        .title_bar(false)
-        .resizable(false)
-        .frame(frame)
-        .default_pos(pos2((canvas.right() - width - 16.0 - offset).max(canvas.left() + 8.0), canvas.top() + 40.0))
-        .show(ctx, |ui| {
-            ui.set_width(width);
-            // Photoshop-style tab header with a close box.
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(tl!(&title)).color(t.text).size(12.0).strong());
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if crate::icons::button(ui, "x", 20.0, false, tl!("Close")).clicked() {
-                        close = true;
-                    }
-                    if key == "styles" {
-                        let resp = crate::icons::button(ui, "ellipsis", 20.0, false, tl!("Panel menu"));
-                        egui::Popup::menu(&resp).show(|ui| {
-                            crate::widgets::style_spectrum_popup_menu(ui);
-                            ui.set_min_width(180.0);
-                            styles_menu(app, ui);
-                        });
-                    }
-                });
+    let card = FloatCard {
+        id: egui::Id::unique(("preset-window", key)),
+        title,
+        pos: pos2((canvas.right() - width - 16.0 - offset).max(canvas.left() + 8.0), canvas.top() + 40.0),
+        size: CardSize::Width(width),
+        header: Header::Compact,
+    };
+    let extras = |app: &mut PhotocraftApp, ui: &mut egui::Ui| {
+        if key == "styles" {
+            let resp = crate::icons::button(ui, "ellipsis", 20.0, false, tl!("Panel menu"));
+            egui::Popup::menu(&resp).show(|ui| {
+                crate::widgets::style_spectrum_popup_menu(ui);
+                ui.set_min_width(180.0);
+                styles_menu(app, ui);
             });
-            crate::widgets::hairline(ui);
-            ui.add_space(4.0);
-            body(app, ui);
-        });
-    close
+        }
+    };
+    card.show(app, ctx, extras, body)
 }
 
 /// Draws the open floating panels (Styles, Shapes, Tool Presets, Clone Source).

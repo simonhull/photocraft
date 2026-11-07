@@ -37,6 +37,18 @@ impl PhotocraftApp {
         self.services.host_chrome.as_ref().is_some_and(|chrome| part(chrome) == crate::Drawn::ByHost)
     }
 
+    /// Hands parts of the chrome to the host app ([`crate::Services::host_chrome`]), or takes them
+    /// back with `None`. The panels and options bar PhotoCraft showed in the parts the host takes
+    /// over are closed: they open on demand from then on, as floating cards.
+    pub fn set_host_chrome(&mut self, chrome: Option<crate::HostChrome>) {
+        if chrome.as_ref().is_some_and(|c| c.dock == crate::Drawn::ByHost) {
+            for group in crate::dock::Group::ALL {
+                *group.shown_mut(&mut self.ui.panels) = false;
+            }
+        }
+        self.services.host_chrome = chrome;
+    }
+
     /// Shared logic body. A wrapping host owns the final reset tail after its own work.
     pub fn logic_frame(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         self.cap_frame_rate();
@@ -322,7 +334,8 @@ impl PhotocraftApp {
             egui::CentralPanel::default().frame(egui::Frame::NONE.fill(backdrop)).show(ui, |ui| {
                 canvas::document_area(self, ui);
             });
-            if !home {
+            // A host-drawn dock's Properties floats among the other panels' cards.
+            if !home && !self.host_draws(|c| c.dock) {
                 panels::properties_window(self, &ctx);
             }
         }
@@ -336,6 +349,9 @@ impl PhotocraftApp {
             analysis_ui::windows(self, &ctx);
             timeline_ui::windows(self, &ctx);
             workspace_ui::windows(self, &ctx);
+            if self.host_draws(|c| c.dock) {
+                panels::floating_panels(self, &ctx);
+            }
         }
         palette::show(self, &ctx);
         dialogs::show(self, &ctx);

@@ -30,9 +30,11 @@ pub mod color_panel_ui;
 pub mod comps_ui;
 pub mod doc_props_ui;
 mod dock;
+pub(crate) mod float_card;
 pub mod histogram_panel;
 mod history;
 pub mod history_menu_ui;
+mod host_panels;
 pub(crate) mod info;
 mod layer_drag;
 pub mod layer_filter_ui;
@@ -79,6 +81,7 @@ use history::history;
 #[cfg(test)]
 pub(crate) use history::select_snapshot;
 pub(crate) use history::selected_snapshot;
+pub(crate) use host_panels::{checked as host_panel_checked, command as host_panel_command, floating_panels};
 #[cfg(test)]
 use info::info_panel;
 pub(crate) use info::{SamplerReadouts, sampler_readouts};
