@@ -11,6 +11,8 @@
 mod brush;
 mod layers;
 
+use std::cell::Cell;
+
 use craft_mobile::ui::{Edit, Panel, PanelId, PanelInfo, PanelRole};
 use photocraft_ui_egui::PhotocraftApp;
 use serde_json::Value;
@@ -35,6 +37,9 @@ pub(crate) fn panels() -> Vec<PanelInfo> {
 pub(crate) struct Native {
     /// The Layers inspector's drags in progress.
     drags: Drags,
+    /// The shell has shown the Layers inspector: it draws native panels, so PhotoCraft's own
+    /// Layers panel would show the same thing twice. (A shell describes only the panels it opened.)
+    layers_shown: Cell<bool>,
 }
 
 impl Native {
@@ -42,7 +47,10 @@ impl Native {
     /// offer (or Layers without a document).
     pub(crate) fn describe(&self, app: &PhotocraftApp, id: &PanelId) -> Option<Panel> {
         match id.as_str() {
-            LAYERS => layers::describe(app),
+            LAYERS => {
+                self.layers_shown.set(true);
+                layers::describe(app)
+            }
             BRUSH => Some(brush::describe(app)),
             _ => None,
         }
@@ -54,6 +62,14 @@ impl Native {
             LAYERS => layers::apply(app, &mut self.drags, ctx, edit),
             BRUSH => brush::apply(app, ctx, edit),
             other => Err(format!("no native panel `{other}`")),
+        }
+    }
+
+    /// Hide PhotoCraft's own panels the shell draws natively (Window › Layers included), once the
+    /// shell has shown that it does.
+    pub(crate) fn hide_replaced_panels(&self, app: &mut PhotocraftApp) {
+        if self.layers_shown.get() {
+            app.ui.panels.layers = false;
         }
     }
 }
@@ -98,6 +114,23 @@ mod tests {
             panel.check().unwrap();
         }
         assert!(native.describe(&app, &"timeline".into()).is_none());
+    }
+
+    /// PhotoCraft's own Layers panel stays until the shell shows the native one (the Compose
+    /// shell doesn't draw native panels yet), and then for good: Window › Layers can't bring it back.
+    #[test]
+    fn the_egui_layers_panel_goes_once_the_shell_shows_the_native_one() {
+        let (mut app, native) = (app(), Native::default());
+        app.ui.panels.layers = true;
+        native.describe(&app, &BRUSH.into());
+        native.hide_replaced_panels(&mut app);
+        assert!(app.ui.panels.layers, "the brush popover alone replaces nothing");
+        native.describe(&app, &LAYERS.into());
+        native.hide_replaced_panels(&mut app);
+        assert!(!app.ui.panels.layers);
+        app.ui.panels.layers = true;
+        native.hide_replaced_panels(&mut app);
+        assert!(!app.ui.panels.layers);
     }
 
     #[test]
