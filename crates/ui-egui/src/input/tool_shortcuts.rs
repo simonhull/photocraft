@@ -3,7 +3,8 @@
 
 use crate::{PhotocraftApp, state::Tool};
 
-pub(crate) fn id(tool: Tool) -> String {
+/// The command that selects `tool` (`tools.select.brush`), as Edit › Keyboard Shortcuts lists it.
+pub fn id(tool: Tool) -> String {
     let mut name = format!("{tool:?}");
     if let Some(first) = name.get_mut(..1) {
         first.make_ascii_lowercase();
@@ -11,7 +12,8 @@ pub(crate) fn id(tool: Tool) -> String {
     format!("tools.select.{name}")
 }
 
-pub(crate) fn tool(id: &str) -> Option<Tool> {
+/// The tool a [`id`] command selects.
+pub fn tool(id: &str) -> Option<Tool> {
     let name = id.strip_prefix("tools.select.")?;
     let tool = Tool::from_name(name)?;
     (id == self::id(tool)).then_some(tool)
@@ -21,7 +23,8 @@ pub(crate) fn default(tool: Tool) -> Option<String> {
     (tool.key() != '\0').then(|| tool.key().to_string())
 }
 
-pub(crate) fn shortcut(app: &PhotocraftApp, tool: Tool) -> Option<String> {
+/// The key that selects `tool` now (`B`, or the user's own from Edit › Keyboard Shortcuts), if any.
+pub fn shortcut(app: &PhotocraftApp, tool: Tool) -> Option<String> {
     crate::shortcuts::effective_shortcut(app, &id(tool), default(tool).as_deref())
 }
 

@@ -202,7 +202,7 @@ pub use input::shortcuts;
 use input::single_line_drag;
 pub use input::spring_tools;
 pub use input::stylus;
-use input::tool_shortcuts;
+pub use input::tool_shortcuts;
 pub use input::touch_twins;
 pub use menus::enable_rules;
 pub use menus::menu_keys;
