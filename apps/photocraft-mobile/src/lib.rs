@@ -85,6 +85,8 @@ pub struct PhotoCraftMobile {
     /// PhotoCraft's own copy as it put it on the clipboard, while the clipboard still holds it
     /// and a paste is reading it (this frame only).
     own_copy: OwnCopy,
+    /// The native panels' state (drags in progress).
+    native: native::Native,
 }
 
 /// PhotoCraft's own copy's pixels for the clipboard service: see [`PhotoCraftMobile::own_copy`].
@@ -252,7 +254,21 @@ impl CraftApp for PhotoCraftMobile {
         let mut services = services(&platform, inbox.clone(), located.clone(), issued.clone(), writing.clone(), encoded.clone(), suspended.clone());
         tablet_menus(&mut services, &platform, pastes.clone(), own_copy.clone());
         let app = create_app(ctx, wgpu, services);
-        Self { app, inbox, located, issued, writing, encoded, previews: PreviewOverride::default(), suspended, platform, pastes, answered: None, own_copy }
+        Self {
+            app,
+            inbox,
+            located,
+            issued,
+            writing,
+            encoded,
+            previews: PreviewOverride::default(),
+            suspended,
+            platform,
+            pastes,
+            answered: None,
+            own_copy,
+            native: native::Native::default(),
+        }
     }
 
     fn wgpu_configuration() -> eframe::egui_wgpu::WgpuConfiguration {
@@ -331,11 +347,11 @@ impl CraftApp for PhotoCraftMobile {
     }
 
     fn describe(&self, panel: &craft_mobile::ui::PanelId) -> Option<craft_mobile::ui::Panel> {
-        native::describe(&self.app, panel)
+        self.native.describe(&self.app, panel)
     }
 
     fn apply(&mut self, ctx: &egui::Context, edit: &craft_mobile::ui::Edit) -> Result<(), String> {
-        native::apply(&mut self.app, ctx, edit)
+        self.native.apply(&mut self.app, ctx, edit)
     }
 
     /// Start writing crash-recovery copies of every unsaved document, and return: they write on

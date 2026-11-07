@@ -3,7 +3,8 @@
 //!
 //! One drag is one undo step: every edit of a gesture carries the same `coalesce` key
 //! ([`coalesce_key`]), which the engine folds into one history step (and one journal entry).
-//! A `begin` does nothing (it carries the value from before the drag); `change` and `commit` apply.
+//! A `begin` applies nothing; the Layers inspector records there which layers the drag edits
+//! ([`Drags`]), so the rest of it can't move to another layer.
 //!
 //! [`menus::invoke`]: photocraft_ui_egui::menus::invoke
 
@@ -13,6 +14,8 @@ mod layers;
 use craft_mobile::ui::{Edit, Panel, PanelId, PanelInfo, PanelRole};
 use photocraft_ui_egui::PhotocraftApp;
 use serde_json::Value;
+
+pub(crate) use layers::Drags;
 
 /// The Layers inspector's id.
 const LAYERS: &str = "layers";
@@ -27,22 +30,31 @@ pub(crate) fn panels() -> Vec<PanelInfo> {
     ]
 }
 
-/// One panel, described from the app as it is now; `None` for a panel PhotoCraft doesn't offer
-/// (or Layers without a document).
-pub(crate) fn describe(app: &PhotocraftApp, id: &PanelId) -> Option<Panel> {
-    match id.as_str() {
-        LAYERS => layers::describe(app),
-        BRUSH => Some(brush::describe(app)),
-        _ => None,
-    }
+/// The native panels' state between frames.
+#[derive(Debug, Default)]
+pub(crate) struct Native {
+    /// The Layers inspector's drags in progress.
+    drags: Drags,
 }
 
-/// Apply one edit from a native panel.
-pub(crate) fn apply(app: &mut PhotocraftApp, ctx: &egui::Context, edit: &Edit) -> Result<(), String> {
-    match edit.panel.as_str() {
-        LAYERS => layers::apply(app, ctx, edit),
-        BRUSH => brush::apply(app, ctx, edit),
-        other => Err(format!("no native panel `{other}`")),
+impl Native {
+    /// One panel, described from the app as it is now; `None` for a panel PhotoCraft doesn't
+    /// offer (or Layers without a document).
+    pub(crate) fn describe(&self, app: &PhotocraftApp, id: &PanelId) -> Option<Panel> {
+        match id.as_str() {
+            LAYERS => layers::describe(app),
+            BRUSH => Some(brush::describe(app)),
+            _ => None,
+        }
+    }
+
+    /// Apply one edit from a native panel.
+    pub(crate) fn apply(&mut self, app: &mut PhotocraftApp, ctx: &egui::Context, edit: &Edit) -> Result<(), String> {
+        match edit.panel.as_str() {
+            LAYERS => layers::apply(app, &mut self.drags, ctx, edit),
+            BRUSH => brush::apply(app, ctx, edit),
+            other => Err(format!("no native panel `{other}`")),
+        }
     }
 }
 
@@ -71,29 +83,21 @@ mod tests {
     use photocraft_engine::Session;
     use photocraft_ui_egui::Services;
 
-    #[test]
-    fn every_offered_panel_is_described_and_well_formed() {
+    fn app() -> PhotocraftApp {
         let mut session = Session::new();
         session.execute("file.new", serde_json::json!({"width": 8, "height": 8})).unwrap();
-        let app = PhotocraftApp::new(session, Services::default());
-        for info in panels() {
-            let panel = describe(&app, &info.id).unwrap();
-            assert_eq!(panel.id(), &info.id);
-            panel.check().unwrap();
-        }
-        assert!(describe(&app, &"timeline".into()).is_none());
+        PhotocraftApp::new(session, Services::default())
     }
 
     #[test]
-    fn a_gestures_key_names_panel_control_and_gesture() {
-        let edit = Edit {
-            panel: "layers".into(),
-            control: "opacity".into(),
-            phase: craft_mobile::ui::Phase::Change,
-            gesture: 9,
-            value: craft_mobile::ui::EditValue::Number(0.5),
-        };
-        assert_eq!(coalesce_key(&edit), "native-layers-opacity:9");
+    fn every_offered_panel_is_described_and_well_formed() {
+        let (app, native) = (app(), Native::default());
+        for info in panels() {
+            let panel = native.describe(&app, &info.id).unwrap();
+            assert_eq!(panel.id(), &info.id);
+            panel.check().unwrap();
+        }
+        assert!(native.describe(&app, &"timeline".into()).is_none());
     }
 
     #[test]
