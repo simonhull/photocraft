@@ -59,7 +59,7 @@ pub(super) fn describe(app: &PhotocraftApp) -> Panel {
         super::BRUSH,
         "Brush",
         PanelRole::Tool,
-        vec![Node::Section(Section::new("tip", "Brush", tip)), Node::Section(Section::new("dynamics", "Shape Dynamics", shape))],
+        vec![Node::Section(Section::new("tip", "Tip", tip)), Node::Section(Section::new("dynamics", "Shape Dynamics", shape))],
     )
 }
 
@@ -136,6 +136,14 @@ mod tests {
         assert_eq!(control["enabled"], json!(b.shape_dynamics.enabled), "greyed out with Shape Dynamics off");
         let ids: Vec<&str> = control["options"].as_array().unwrap().iter().map(|o| o["id"].as_str().unwrap()).collect();
         assert_eq!(ids, ["off", "fade", "penPressure", "penTilt", "stylusWheel", "rotation"]);
+    }
+
+    /// The popover is titled Brush: its sections don't say it again.
+    #[test]
+    fn sections_dont_repeat_the_title() {
+        let (app, _) = app();
+        let titles: Vec<String> = described(&app).as_array().unwrap().iter().map(|n| n["title"].as_str().unwrap().to_owned()).collect();
+        assert_eq!(titles, ["Tip", "Shape Dynamics"]);
     }
 
     /// An option's id is the control's own name in a brush patch.
