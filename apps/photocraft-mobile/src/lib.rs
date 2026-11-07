@@ -465,7 +465,7 @@ impl eframe::App for PhotoCraftMobile {
     }
 
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        self.native.hide_replaced_panels(&mut self.app);
+        self.hide_replaced_panels();
         // As files from disk: decoded on a worker, then File › Save writes back to them.
         for (path, bytes) in self.located.take() {
             if let Err(e) = self.app.open_file(&path, &bytes) {
@@ -489,7 +489,7 @@ impl eframe::App for PhotoCraftMobile {
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         // Window › Layers may have turned it on since `logic`: not even for a frame.
-        self.native.hide_replaced_panels(&mut self.app);
+        self.hide_replaced_panels();
         self.app.ui(ui, frame);
         self.note_writes();
         show_file_names(&mut self.app.ui.status);
@@ -505,6 +505,14 @@ fn show_file_names(status: &mut String) {
 }
 
 impl PhotoCraftMobile {
+    /// PhotoCraft's own panels the shell draws natively stay hidden; asking for one opens the
+    /// native panel instead.
+    fn hide_replaced_panels(&mut self) {
+        if let Some(panel) = self.native.hide_replaced_panels(&mut self.app) {
+            self.platform.open_panel(panel);
+        }
+    }
+
     /// Remove the recovery copies written on leaving the screen whose documents have no unsaved
     /// changes left: saved since, or closed. (PhotoCraft removes its own timed autosaves.)
     fn forget_stale_recovery(&mut self) {

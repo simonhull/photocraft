@@ -40,6 +40,8 @@ pub(crate) struct Native {
     /// The shell has shown the Layers inspector: it draws native panels, so PhotoCraft's own
     /// Layers panel would show the same thing twice. (A shell describes only the panels it opened.)
     layers_shown: Cell<bool>,
+    /// PhotoCraft's own Layers panel has been hidden since: it showing again is the user asking.
+    layers_hidden: Cell<bool>,
 }
 
 impl Native {
@@ -65,12 +67,17 @@ impl Native {
         }
     }
 
-    /// Hide PhotoCraft's own panels the shell draws natively (Window › Layers included), once the
-    /// shell has shown that it does.
-    pub(crate) fn hide_replaced_panels(&self, app: &mut PhotocraftApp) {
-        if self.layers_shown.get() {
-            app.ui.panels.layers = false;
+    /// Hide PhotoCraft's own panels the shell draws natively, once the shell has shown that it
+    /// does. Asking for one since (Window › Layers, the rail's Layers icon) gives the id of the
+    /// native panel to open instead: for [`craft_mobile::Platform::open_panel`].
+    pub(crate) fn hide_replaced_panels(&self, app: &mut PhotocraftApp) -> Option<&'static str> {
+        if !self.layers_shown.get() {
+            return None;
         }
+        // Shown before the native inspector took over (the workspace's panel) isn't asked for.
+        let asked = app.ui.panels.layers && self.layers_hidden.replace(true);
+        app.ui.panels.layers = false;
+        asked.then_some(LAYERS)
     }
 }
 
@@ -117,20 +124,31 @@ mod tests {
     }
 
     /// PhotoCraft's own Layers panel stays until the shell shows the native one (the Compose
-    /// shell doesn't draw native panels yet), and then for good: Window › Layers can't bring it back.
+    /// shell doesn't draw native panels yet), and then for good.
     #[test]
     fn the_egui_layers_panel_goes_once_the_shell_shows_the_native_one() {
         let (mut app, native) = (app(), Native::default());
         app.ui.panels.layers = true;
         native.describe(&app, &BRUSH.into());
-        native.hide_replaced_panels(&mut app);
+        assert_eq!(native.hide_replaced_panels(&mut app), None);
         assert!(app.ui.panels.layers, "the brush popover alone replaces nothing");
         native.describe(&app, &LAYERS.into());
-        native.hide_replaced_panels(&mut app);
+        assert_eq!(native.hide_replaced_panels(&mut app), None, "the inspector is open already");
         assert!(!app.ui.panels.layers);
+        assert_eq!(native.hide_replaced_panels(&mut app), None);
+    }
+
+    /// Window › Layers or the rail's Layers icon, once the native inspector replaces the panel:
+    /// the shell is asked to open the inspector, once, and the egui panel stays hidden.
+    #[test]
+    fn asking_for_the_egui_layers_panel_opens_the_native_one() {
+        let (mut app, native) = (app(), Native::default());
+        native.describe(&app, &LAYERS.into());
+        native.hide_replaced_panels(&mut app);
         app.ui.panels.layers = true;
-        native.hide_replaced_panels(&mut app);
+        assert_eq!(native.hide_replaced_panels(&mut app), Some(LAYERS));
         assert!(!app.ui.panels.layers);
+        assert_eq!(native.hide_replaced_panels(&mut app), None, "one request per ask");
     }
 
     #[test]
