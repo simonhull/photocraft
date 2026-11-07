@@ -68,7 +68,13 @@ impl PhotocraftApp {
     /// Hands parts of the chrome to the host app, or takes them back with `None`. The panels and
     /// options bar PhotoCraft showed in the parts the host takes over are closed (they open on
     /// demand from then on, as floating cards), and come back as they were when it gives them back.
+    ///
+    /// Idempotent: the chrome it already has changes nothing, so a host that says it again (a
+    /// shell restarting) doesn't close the open cards.
     pub fn set_host_chrome(&mut self, chrome: Option<HostChrome>) {
+        if self.host_chrome() == chrome.as_ref() {
+            return;
+        }
         if let Some(old) = self.host.take() {
             old.before.apply(&old.chrome, &mut self.ui.panels);
         }

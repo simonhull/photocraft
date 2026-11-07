@@ -190,6 +190,20 @@ fn window_color_floats_a_color_card_and_toggling_it_again_closes_it() {
     assert!(!h.state().ui.panels.color);
 }
 
+/// Setting the chrome it already has changes nothing: a shell that says it again (it restarted)
+/// doesn't close the open cards, or forget the panels to give back.
+#[test]
+fn setting_the_same_chrome_again_keeps_the_cards() {
+    let (mut h, _) = host_app();
+    run(&mut h, "window.toggle.color");
+    h.state_mut().set_host_chrome(Some(all_host_drawn()));
+    h.run_steps(4);
+    assert_eq!(cards(&h), ["Color"]);
+    assert!(h.state().ui.panels.color);
+    h.state_mut().set_host_chrome(None);
+    assert!(h.state().ui.panels.layers, "the dock's panels from before the takeover come back");
+}
+
 #[test]
 fn closing_the_card_clears_its_flag() {
     let (mut h, _) = host_app();

@@ -377,10 +377,8 @@ impl CraftApp for PhotoCraftMobile {
     fn shell(&mut self, ctx: &egui::Context, features: &ShellFeatures) {
         let features = *features;
         self.native.shell(features);
-        let chrome = native::host_chrome(features);
-        if self.app.host_chrome() != chrome.as_ref() {
-            self.app.set_host_chrome(chrome);
-        }
+        // The same chrome again changes nothing (`set_host_chrome` is idempotent).
+        self.app.set_host_chrome(native::host_chrome(features));
         let services = &mut self.app.services;
         if !features.contains(Feature::Menus) {
             services.native_menu = None;
