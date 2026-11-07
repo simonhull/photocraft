@@ -440,6 +440,35 @@ pub struct HostMenu {
     pub run: HostRunFn,
 }
 
+/// Who draws a part of PhotoCraft's chrome ([`HostChrome`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Drawn {
+    /// PhotoCraft draws it, as on the desktop.
+    #[default]
+    ByPhotoCraft,
+    /// The host app draws it its own way; PhotoCraft leaves it out.
+    ByHost,
+}
+
+/// Parts of PhotoCraft's chrome the host app draws itself (a tablet shell's native UI). ui-egui
+/// skips drawing them; their commands, shortcuts and state work as before. The default leaves
+/// every part to PhotoCraft.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct HostChrome {
+    /// The menu bar (the host shows `menus::menu_items` its own way, e.g. through `native_menu`).
+    pub menus: Drawn,
+    /// The toolbar (tool rail).
+    pub toolbar: Drawn,
+    /// The options bar.
+    pub options_bar: Drawn,
+    /// The status bar (the host shows `ui.status` and job progress).
+    pub status_bar: Drawn,
+    /// The document tabs (the host offers its own document switcher).
+    pub tabs: Drawn,
+    /// The panel dock: the canvas fills the window, on the pasteboard colour.
+    pub dock: Drawn,
+}
+
 /// Polls the platform's optional WinTab packet queue into the app's stylus feed (Windows), with
 /// whether the app window is focused (to re-assert WinTab overlap priority on activation).
 pub type TabletPollFn = Box<dyn FnMut(bool)>;
@@ -604,4 +633,6 @@ pub struct Services {
     pub quit: Option<QuitFn>,
     /// Menu items and command handling the host app adds (a tablet shell's Photos and share sheet).
     pub host_menu: Option<HostMenu>,
+    /// The parts of the chrome the host app draws itself (a tablet shell); `None` draws them all.
+    pub host_chrome: Option<HostChrome>,
 }

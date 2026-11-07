@@ -31,6 +31,12 @@ impl PhotocraftApp {
         !opening && self.ui.chrome.shows_home(n, self.session.prefs().general.auto_show_home_screen)
     }
 
+    /// Whether the host app draws `part` of the chrome itself ([`crate::Services::host_chrome`]),
+    /// so PhotoCraft leaves it out.
+    pub(crate) fn host_draws(&self, part: fn(&crate::HostChrome) -> crate::Drawn) -> bool {
+        self.services.host_chrome.as_ref().is_some_and(|chrome| part(chrome) == crate::Drawn::ByHost)
+    }
+
     /// Shared logic body. A wrapping host owns the final reset tail after its own work.
     pub fn logic_frame(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         self.cap_frame_rate();
@@ -289,22 +295,25 @@ impl PhotocraftApp {
         }
         // In Full Screen Mode, Tab shows the menu bar, options bar, toolbar and dock (#6760).
         let tabbed_in = !chrome && self.ui.panels.full_screen_chrome;
-        if (chrome || tabbed_in) && self.ui.panels.menu_bar {
+        // A part of the chrome the host app draws itself (`Services::host_chrome`) is left out.
+        if (chrome || tabbed_in) && self.ui.panels.menu_bar && !self.host_draws(|c| c.menus) {
             panels::title_bar(self, ui);
         }
         // Home is only the menu bar and the Home content; the saved panel prefs are untouched.
         let home = self.home_screen_up();
-        if ((chrome && self.ui.panels.options_bar) || tabbed_in) && !home {
+        if ((chrome && self.ui.panels.options_bar) || tabbed_in) && !home && !self.host_draws(|c| c.options_bar) {
             panels::options_bar(self, ui);
         }
-        if chrome && self.ui.panels.status_bar && !home {
+        if chrome && self.ui.panels.status_bar && !home && !self.host_draws(|c| c.status_bar) {
             panels::status_bar(self, ui);
         }
-        if ((chrome && self.ui.panels.toolbar) || tabbed_in) && !home {
+        if ((chrome && self.ui.panels.toolbar) || tabbed_in) && !home && !self.host_draws(|c| c.toolbar) {
             panels::toolbar(self, ui);
         }
         // craft-ui's layout holds the canvas as its protected `canvas` panel.
-        let docking = ((chrome && self.ui.panels.dock) || tabbed_in) && !home;
+        // A host-drawn dock leaves the canvas the whole window, on the pasteboard colour (Full
+        // Screen's black is for the view alone).
+        let docking = ((chrome && self.ui.panels.dock) || tabbed_in) && !home && !self.host_draws(|c| c.dock);
         if docking {
             panels::dock_area(self, ui);
         } else {
