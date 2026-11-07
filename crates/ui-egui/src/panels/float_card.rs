@@ -1,6 +1,6 @@
 //! The card-styled floating window: a titled card over the canvas with a close button, used by the
 //! floating preset panels (Styles, Shapes, …), and by the dock's panels and the options bar when
-//! the host app draws the chrome (`Services::host_chrome`).
+//! the host app draws the chrome (`PhotocraftApp::set_host_chrome`).
 
 use egui::{CornerRadius, Stroke};
 

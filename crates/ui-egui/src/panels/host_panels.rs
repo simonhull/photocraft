@@ -16,6 +16,9 @@ use crate::dock::Group;
 /// A card's first size, and how far each further card steps down and in from the last.
 const CARD_SIZE: egui::Vec2 = egui::vec2(320.0, 420.0);
 const CARD_STEP: f32 = 28.0;
+/// Room left at the top for the options bar's card (`options_card`) when the host draws the bar,
+/// so the two don't stack on one another.
+const OPTIONS_CARD_ROOM: f32 = 120.0;
 
 /// The `PANELS` id a `window.toggle.*` or `window.panel.*` command names, if any.
 fn named_panel(id: &str) -> Option<&'static str> {
@@ -24,7 +27,7 @@ fn named_panel(id: &str) -> Option<&'static str> {
 
 /// Whether the host draws panel `id` itself.
 fn native(app: &PhotocraftApp, id: &str) -> bool {
-    app.services.host_chrome.as_ref().is_some_and(|chrome| chrome.native_panels.iter().any(|native| native == id))
+    app.host_chrome().is_some_and(|chrome| chrome.native_panels.iter().any(|native| native == id))
 }
 
 /// Panel `id`'s group and its tab there.
@@ -36,8 +39,7 @@ fn place(app: &PhotocraftApp, id: &str) -> Option<(Group, usize)> {
 
 /// The tab `group`'s card shows.
 fn selected_tab(app: &PhotocraftApp, group: Group) -> usize {
-    let mut tabs = app.ui.dock_tabs;
-    *group.tab_mut(&mut tabs)
+    group.tab(&app.ui.dock_tabs)
 }
 
 /// Whether panel `id` shows in an open card.
@@ -101,6 +103,7 @@ pub(crate) fn checked(app: &PhotocraftApp, id: &str) -> Option<bool> {
 /// one clears its group's flag.
 pub(crate) fn floating_panels(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let canvas = app.last_canvas_rect;
+    let options_card = app.host_draws(|chrome| chrome.options_bar);
     let open: Vec<(Group, &'static str)> =
         Group::ALL.into_iter().filter(|group| group.shown(&app.ui.panels)).filter_map(|group| Some((group, card_panel(app, group)?))).collect();
     for (step, (group, panel)) in (0u8..).zip(open) {
@@ -108,10 +111,11 @@ pub(crate) fn floating_panels(app: &mut PhotocraftApp, ctx: &egui::Context) {
         // The card shows the panel its group has selected, as the dock would.
         *group.tab_mut(&mut app.ui.dock_tabs) = tab;
         let inset = 16.0 + CARD_STEP * f32::from(step);
+        let top = canvas.top() + inset + if options_card { OPTIONS_CARD_ROOM } else { 0.0 };
         let card = FloatCard {
             id: egui::Id::unique(("host-panel-card", group.key())),
             title: label,
-            pos: egui::pos2((canvas.right() - CARD_SIZE.x - inset).max(canvas.left() + 8.0), canvas.top() + inset),
+            pos: egui::pos2((canvas.right() - CARD_SIZE.x - inset).max(canvas.left() + 8.0), top),
             size: CardSize::Resizable(CARD_SIZE),
             header: Header::Touch,
         };

@@ -261,6 +261,7 @@ fn select_workspace(app: &mut PhotocraftApp, p: &Value) -> Result<Value, String>
     }
     app.ui.workspace = name.clone();
     apply_custom(app);
+    app.host_closes_its_parts();
     Ok(json!({"workspace": name}))
 }
 

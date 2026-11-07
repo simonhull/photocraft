@@ -137,6 +137,19 @@ impl Group {
         }
     }
 
+    /// The group's selected tab.
+    pub(crate) fn tab(self, tabs: &DockTabs) -> usize {
+        match self {
+            Group::Color => tabs.color,
+            Group::Properties => tabs.properties,
+            Group::Character => tabs.character,
+            Group::Navigator => tabs.navigator,
+            Group::History => tabs.history,
+            Group::Layers => tabs.layers,
+            Group::Brushes => tabs.brushes,
+        }
+    }
+
     /// The group for a `panels` / `dockTabs` key ("color", "properties", …).
     pub fn from_key(key: &str) -> Option<Group> {
         Group::ALL.into_iter().find(|g| g.key() == key)
@@ -339,7 +352,7 @@ pub(crate) fn close_tab(app: &mut PhotocraftApp, g: Group, tab: usize, pro: bool
 
 /// What `prefs.panelLayout` holds: the live layout and open panels.
 pub(crate) fn snapshot(app: &PhotocraftApp) -> Value {
-    let mut layout = json!({"workspace": app.ui.workspace, "panels": app.ui.panels, "dockTabs": app.ui.dock_tabs, "dock": app.ui.dock, "timelineOpen": app.ui.timeline.open, "docking": app.ui.docking, "dockingReturns": app.ui.docking_returns, "dockingCollapsed": app.ui.docking_collapsed});
+    let mut layout = json!({"workspace": app.ui.workspace, "panels": app.panels_to_remember(), "dockTabs": app.ui.dock_tabs, "dock": app.ui.dock, "timelineOpen": app.ui.timeline.open, "docking": app.ui.docking, "dockingReturns": app.ui.docking_returns, "dockingCollapsed": app.ui.docking_collapsed});
     keep_newer(app, &mut layout);
     layout
 }

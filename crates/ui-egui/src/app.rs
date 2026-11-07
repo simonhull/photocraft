@@ -18,6 +18,7 @@ pub use files::flat_file_keeps;
 pub(crate) use files::flat_format_keeps;
 mod frame;
 mod gpu;
+mod host_chrome;
 mod ime;
 mod input;
 mod prefs;
@@ -28,6 +29,7 @@ mod view;
 mod window;
 
 pub(crate) use files::remember_new_document;
+pub(crate) use host_chrome::HostState;
 pub(crate) use input::read_dropped;
 pub(crate) use targets::adjustment_layer_active;
 #[cfg(test)]
@@ -215,6 +217,7 @@ impl PhotocraftApp {
             min_frame_ms: None,
             last_frame_start_ms: 0.0,
             jobs: Default::default(),
+            host: None,
             #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
             live_tokens: theme::live::LiveTokens::from_env(),
         };

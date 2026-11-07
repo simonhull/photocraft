@@ -799,6 +799,10 @@ fn toggle_panels(app: &mut PhotocraftApp) -> Result<Value, String> {
         app.ui.panels.full_screen_chrome = !app.ui.panels.full_screen_chrome;
         return Ok(Value::Null);
     }
+    // Host mode: Tab hides and shows the floating cards (the host draws the bars).
+    if app.host_toggle_cards() {
+        return Ok(Value::Null);
+    }
     let panels = &mut app.ui.panels;
     match panels.hidden_by_tab.take() {
         Some([toolbar, options, dock]) if !(panels.toolbar || panels.options_bar || panels.dock) => {
@@ -846,6 +850,7 @@ fn toggle_panel(app: &mut PhotocraftApp, id: &str) -> Result<Value, String> {
 pub fn apply_workspace(app: &mut PhotocraftApp) {
     // Saved workspaces (Window › Workspace › New Workspace…) restore their own layout.
     if crate::workspace_ui::apply_custom(app) {
+        app.host_closes_its_parts();
         return;
     }
     // Presets use the default group order, heights and tabs (Reset brings everything back).
@@ -880,6 +885,7 @@ pub fn apply_workspace(app: &mut PhotocraftApp) {
     if !app.ui.timeline.open {
         app.ui.timeline.playing = false;
     }
+    app.host_closes_its_parts();
 }
 
 /// Pointer-dependent shell command; pixel picking and selection remain engine commands.

@@ -31,27 +31,6 @@ impl PhotocraftApp {
         !opening && self.ui.chrome.shows_home(n, self.session.prefs().general.auto_show_home_screen)
     }
 
-    /// Whether the host app draws `part` of the chrome itself ([`crate::Services::host_chrome`]),
-    /// so PhotoCraft leaves it out.
-    pub(crate) fn host_draws(&self, part: fn(&crate::HostChrome) -> crate::Drawn) -> bool {
-        self.services.host_chrome.as_ref().is_some_and(|chrome| part(chrome) == crate::Drawn::ByHost)
-    }
-
-    /// Hands parts of the chrome to the host app ([`crate::Services::host_chrome`]), or takes them
-    /// back with `None`. The panels and options bar PhotoCraft showed in the parts the host takes
-    /// over are closed: they open on demand from then on, as floating cards.
-    pub fn set_host_chrome(&mut self, chrome: Option<crate::HostChrome>) {
-        if chrome.as_ref().is_some_and(|c| c.dock == crate::Drawn::ByHost) {
-            for group in crate::dock::Group::ALL {
-                *group.shown_mut(&mut self.ui.panels) = false;
-            }
-        }
-        if chrome.as_ref().is_some_and(|c| c.options_bar == crate::Drawn::ByHost) {
-            self.ui.panels.options_bar = false;
-        }
-        self.services.host_chrome = chrome;
-    }
-
     /// Shared logic body. A wrapping host owns the final reset tail after its own work.
     pub fn logic_frame(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         self.cap_frame_rate();
@@ -310,7 +289,7 @@ impl PhotocraftApp {
         }
         // In Full Screen Mode, Tab shows the menu bar, options bar, toolbar and dock (#6760).
         let tabbed_in = !chrome && self.ui.panels.full_screen_chrome;
-        // A part of the chrome the host app draws itself (`Services::host_chrome`) is left out.
+        // A part of the chrome the host app draws itself (`PhotocraftApp::set_host_chrome`) is left out.
         if (chrome || tabbed_in) && self.ui.panels.menu_bar && !self.host_draws(|c| c.menus) {
             panels::title_bar(self, ui);
         }
@@ -352,7 +331,7 @@ impl PhotocraftApp {
             analysis_ui::windows(self, &ctx);
             timeline_ui::windows(self, &ctx);
             workspace_ui::windows(self, &ctx);
-            if self.host_draws(|c| c.dock) {
+            if chrome && self.host_draws(|c| c.dock) {
                 panels::floating_panels(self, &ctx);
             }
             // A host-drawn options bar shows on demand, as a card (Window › Options).

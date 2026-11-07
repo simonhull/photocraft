@@ -1,4 +1,4 @@
-//! Host chrome (`Services::host_chrome`): a part the host app draws itself is left out, and the
+//! Host chrome (`PhotocraftApp::set_host_chrome`): a part the host app draws itself is left out, and the
 //! canvas takes its room; the default leaves everything to PhotoCraft.
 
 use std::cell::RefCell;
@@ -44,10 +44,10 @@ fn canvas(h: &Harness<'static, PhotocraftApp>) -> Rect {
     h.state().last_canvas_rect
 }
 
-/// Whether a widget whose label holds `label` is drawn; the status bar's zoom field only by its
-/// whole label, as the Zoom Tool's button starts with it.
+/// Whether a widget whose label holds `label` is drawn; the status bar's zoom field and the File
+/// menu only by their whole labels, as the Zoom Tool's button starts with "Zoom".
 fn shows(h: &Harness<'static, PhotocraftApp>, label: &str) -> bool {
-    if label == STATUS { h.query_all_by_label(label).next().is_some() } else { h.query_all_by_label_contains(label).next().is_some() }
+    if label == STATUS || label == MENUS { h.query_all_by_label(label).next().is_some() } else { h.query_all_by_label_contains(label).next().is_some() }
 }
 
 /// What each part draws that nothing else does: a tool button (not the active tool's, which the
@@ -57,13 +57,16 @@ const TOOLBAR: &str = "Brush Tool";
 const OPTIONS: &str = "Auto-Select";
 const STATUS: &str = "Zoom";
 const DOCK: &str = "Create a new layer";
+/// The menu bar's File menu, and the document's tab (the only place its name shows).
+const MENUS: &str = "File";
+const TABS: &str = "Untitled";
 
 #[test]
 fn the_default_host_chrome_changes_nothing() {
     let without = app(None);
     let default = app(Some(HostChrome::default()));
     assert_eq!(canvas(&without), canvas(&default));
-    for label in [TOOLBAR, OPTIONS, STATUS, DOCK] {
+    for label in [MENUS, TOOLBAR, OPTIONS, STATUS, TABS, DOCK] {
         assert!(shows(&without, label), "{label} is drawn");
         assert_eq!(shows(&without, label), shows(&default, label), "{label}");
     }
@@ -73,11 +76,11 @@ fn the_default_host_chrome_changes_nothing() {
 fn each_host_drawn_part_is_left_out_and_the_canvas_takes_its_room() {
     let full = canvas(&app(None));
     let parts: [(&str, Part, Option<&str>); 6] = [
-        ("menus", |c| &mut c.menus, None),
+        ("menus", |c| &mut c.menus, Some(MENUS)),
         ("toolbar", |c| &mut c.toolbar, Some(TOOLBAR)),
         ("options bar", |c| &mut c.options_bar, Some(OPTIONS)),
         ("status bar", |c| &mut c.status_bar, Some(STATUS)),
-        ("tabs", |c| &mut c.tabs, None),
+        ("tabs", |c| &mut c.tabs, Some(TABS)),
         ("dock", |c| &mut c.dock, Some(DOCK)),
     ];
     for (name, part, label) in parts {
@@ -261,4 +264,80 @@ fn choosing_another_tool_closes_the_options_card() {
     // Asked for again, it shows the new tool's options.
     run(&mut h, "window.toggle.options");
     assert_eq!(cards(&h), [crate::state::Tool::Brush.label()]);
+}
+
+// ------------------------------------------------------------------ review fixes
+
+/// The panel flags `prefs.panelLayout` remembers.
+fn remembered_panels(h: &Harness<'static, PhotocraftApp>) -> serde_json::Value {
+    h.state().session.prefs().panel_layout["panels"].clone()
+}
+
+#[test]
+fn host_mode_never_changes_the_remembered_panels() {
+    let options_only = host_draws(|c| &mut c.options_bar);
+    for chrome in [options_only, all_host_drawn()] {
+        let mut h = app(None);
+        let before = remembered_panels(&h);
+        assert!(before.is_object(), "remembered at the first frame: {before}");
+        h.state_mut().set_host_chrome(Some(chrome.clone()));
+        h.run_steps(4);
+        assert_eq!(remembered_panels(&h), before, "{chrome:?}: in host mode");
+        h.state_mut().set_host_chrome(None);
+        h.run_steps(4);
+        assert_eq!(remembered_panels(&h), before, "{chrome:?}: after leaving host mode");
+        assert!(h.state().ui.panels.options_bar && h.state().ui.panels.color, "the panels come back");
+    }
+}
+
+#[test]
+fn applying_a_workspace_keeps_the_cards_closed() {
+    let (mut h, _) = host_app();
+    for id in ["window.workspace.essentials", "window.workspace.painting", "window.workspace.resetWorkspace"] {
+        run(&mut h, id);
+        assert!(cards(&h).is_empty(), "{id}: {:?}", cards(&h));
+    }
+    // Leaving host mode shows the workspace's panels.
+    h.state_mut().set_host_chrome(None);
+    assert!(h.state().ui.panels.color && h.state().ui.panels.layers);
+}
+
+#[test]
+fn the_host_chrome_is_set_only_through_set_host_chrome() {
+    let mut h = app(None);
+    assert_eq!(h.state().host_chrome(), None);
+    h.state_mut().set_host_chrome(Some(all_host_drawn()));
+    assert_eq!(h.state().host_chrome(), Some(&all_host_drawn()));
+}
+
+#[test]
+fn full_screen_hides_the_cards() {
+    let (mut h, _) = host_app();
+    run(&mut h, "window.toggle.color");
+    run(&mut h, "window.toggle.options");
+    assert_eq!(cards(&h).len(), 2);
+    let mode = std::mem::replace(&mut h.state_mut().ui.view.screen_mode, "fullScreen".into());
+    h.run_steps(4);
+    assert!(cards(&h).is_empty(), "{:?}", cards(&h));
+    h.state_mut().ui.view.screen_mode = mode;
+    h.run_steps(4);
+    assert_eq!(cards(&h).len(), 2);
+}
+
+#[test]
+fn tab_hides_and_shows_the_cards() {
+    let (mut h, _) = host_app();
+    h.state_mut().ui.tool = crate::state::Tool::Move;
+    run(&mut h, "window.toggle.color");
+    run(&mut h, "window.toggle.options");
+    run(&mut h, "window.togglePanels");
+    assert!(cards(&h).is_empty(), "{:?}", cards(&h));
+    run(&mut h, "window.togglePanels");
+    assert_eq!(cards(&h), ["Color", "Move Tool"]);
+    // With nothing open, Tab opens nothing: not the options card either.
+    run(&mut h, "window.toggle.color");
+    run(&mut h, "window.toggle.options");
+    run(&mut h, "window.togglePanels");
+    assert!(cards(&h).is_empty(), "{:?}", cards(&h));
+    assert!(!h.state().ui.panels.options_bar);
 }

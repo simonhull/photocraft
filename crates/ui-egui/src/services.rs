@@ -450,9 +450,9 @@ pub enum Drawn {
     ByHost,
 }
 
-/// Parts of PhotoCraft's chrome the host app draws itself (a tablet shell's native UI). ui-egui
-/// skips drawing them; their commands, shortcuts and state work as before. The default leaves
-/// every part to PhotoCraft.
+/// Parts of PhotoCraft's chrome the host app draws itself (a tablet shell's native UI), set with
+/// [`crate::PhotocraftApp::set_host_chrome`]. ui-egui skips drawing them; their commands,
+/// shortcuts and state work as before. The default leaves every part to PhotoCraft.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HostChrome {
     /// The menu bar (the host shows `menus::menu_items` its own way, e.g. through `native_menu`).
@@ -642,8 +642,6 @@ pub struct Services {
     pub quit: Option<QuitFn>,
     /// Menu items and command handling the host app adds (a tablet shell's Photos and share sheet).
     pub host_menu: Option<HostMenu>,
-    /// The parts of the chrome the host app draws itself (a tablet shell); `None` draws them all.
-    pub host_chrome: Option<HostChrome>,
     /// Opens a panel the host draws natively ([`HostChrome::native_panels`]): Window › Layers and
     /// the panel's other toggles call it instead of showing PhotoCraft's own.
     pub open_host_panel: Option<OpenHostPanelFn>,
