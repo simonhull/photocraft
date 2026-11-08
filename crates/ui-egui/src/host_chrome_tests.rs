@@ -252,6 +252,36 @@ fn a_native_panel_opens_through_the_host_and_leaves_its_flag_alone() {
     assert_eq!(opened.borrow().len(), 2);
 }
 
+/// With the host's own timeline bar, Window › Timeline opens the bar while the document has a
+/// timeline; without one it opens PhotoCraft's panel to create one, which closes once it's made.
+#[test]
+fn window_timeline_opens_the_hosts_bar_once_there_is_a_timeline() {
+    let (mut h, opened) = host_app();
+    let mut chrome = all_host_drawn();
+    chrome.native_panels.push(crate::PanelId::TIMELINE);
+    h.state_mut().set_host_chrome(Some(chrome));
+    run(&mut h, "window.panel.timeline");
+    assert_eq!(cards(&h), ["Timeline"], "no timeline yet: the panel, to create one");
+    assert!(opened.borrow().is_empty());
+    h.state_mut().run("timeline.create", json!({"duration": 10, "fps": 4.0})).unwrap();
+    h.run_steps(4);
+    assert!(cards(&h).is_empty(), "made: the host's bar takes over {:?}", cards(&h));
+    assert!(!h.state().ui.timeline.open);
+    run(&mut h, "window.panel.timeline");
+    assert_eq!(*opened.borrow(), ["timeline"]);
+    assert!(cards(&h).is_empty(), "{:?}", cards(&h));
+}
+
+/// A host without its own timeline bar gets PhotoCraft's panel, timeline or not.
+#[test]
+fn without_the_hosts_timeline_bar_window_timeline_opens_the_panel() {
+    let (mut h, opened) = host_app();
+    h.state_mut().run("timeline.create", json!({"duration": 10, "fps": 4.0})).unwrap();
+    run(&mut h, "window.panel.timeline");
+    assert_eq!(cards(&h), ["Timeline"]);
+    assert!(opened.borrow().is_empty());
+}
+
 #[test]
 fn floating_panels_are_checked_and_native_ones_never() {
     let (mut h, _) = host_app();

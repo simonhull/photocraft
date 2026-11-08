@@ -38,8 +38,9 @@
 //!   parts of PhotoCraft's (its host chrome), and egui draws just the canvas: the menus go to the
 //!   iPad menu bar and run as the macOS menu bar's do, the toolbar becomes the tool rail, the tabs
 //!   the Documents inspector, the status bar the shell's toasts and progress. Window › Layers
-//!   opens the native inspector; every other panel, and the options bar, opens on demand as a
-//!   floating card over the canvas.
+//!   opens the native inspector; a document's timeline shows as the shell's transport bar, played
+//!   from here; every other panel, and the options bar, opens on demand as a floating card over
+//!   the canvas.
 //! - **Power:** while the device is hot or saving power, live previews run on a reduced copy
 //!   (Preferences › Performance › Low Resolution Previews), whatever the preference says.
 
@@ -357,7 +358,7 @@ impl CraftApp for PhotoCraftMobile {
     }
 
     fn panels(&self) -> Vec<craft_mobile::ui::PanelInfo> {
-        self.native.panels()
+        self.native.panels(&self.app)
     }
 
     fn describe(&self, panel: &craft_mobile::ui::PanelId) -> Option<craft_mobile::ui::Panel> {
@@ -425,10 +426,12 @@ impl CraftApp for PhotoCraftMobile {
         }
     }
 
-    /// Start writing crash-recovery copies of every unsaved document, and return: they write on
+    /// Pause a playing timeline, and start writing crash-recovery copies of every unsaved
+    /// document, and return: they write on
     /// the autosave workers, and the app is busy until they are on disk (the OS may end it
     /// without another word once it's off screen, and ends it if this thread hangs).
     fn suspend(&mut self, _ctx: &egui::Context) {
+        self.native.suspend();
         let unsaved: Vec<(Arc<Document>, u64, Option<String>)> =
             self.app.session.documents().iter().filter(|st| st.is_dirty()).map(|st| (st.doc.clone(), st.revision, st.path.clone())).collect();
         let Some(autosave) = self.app.services.autosave.as_mut() else { return };
@@ -560,6 +563,7 @@ impl eframe::App for PhotoCraftMobile {
             self.app.ui.status = e;
             self.app.ui.status_error = true;
         }
+        self.native.tick(&mut self.app, ctx);
         self.app.logic(ctx, frame);
         self.forget_stale_recovery();
         // After the jobs moved on: a save whose job just ended has handed its bytes over.

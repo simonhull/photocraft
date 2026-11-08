@@ -1,5 +1,10 @@
 //! Window › Timeline: a floating panel that creates and drives the document timeline. All actions
 //! run the engine `timeline.*` commands, so the control channel drives it the same way.
+//!
+//! A host app that draws the dock and has its own timeline bar (`HostChrome::native_panels` lists
+//! the Timeline) shows that bar instead while the document has a timeline: Window › Timeline opens
+//! it through `Services::open_host_panel`. Without a timeline the panel still opens, to create one,
+//! and closes itself once there is one.
 
 use egui::{RichText, vec2};
 use serde::{Deserialize, Serialize};
@@ -30,9 +35,23 @@ pub fn handles(id: &str) -> bool {
     id == "window.panel.timeline"
 }
 
-/// Toggle the Timeline panel.
+/// Whether the host's own timeline bar stands for the panel: it draws the dock, has the bar, and
+/// the document has a timeline for it.
+fn host_bar(app: &PhotocraftApp) -> bool {
+    app.host_draws(|chrome| chrome.dock)
+        && app.host_chrome().is_some_and(|chrome| chrome.native_panels.contains(&crate::PanelId::TIMELINE))
+        && app.session.active().is_some_and(|st| st.doc.timeline.is_some())
+}
+
+/// Toggle the Timeline panel, or open the host's bar in its place.
 pub fn menu(app: &mut PhotocraftApp, id: &str, _params: &Value) -> Option<Result<Value, String>> {
     if id == "window.panel.timeline" {
+        if host_bar(app) {
+            if let Some(open) = app.services.open_host_panel.as_mut() {
+                open(crate::PanelId::TIMELINE);
+            }
+            return Some(Ok(Value::Null));
+        }
         app.ui.timeline.open = !app.ui.timeline.open;
         return Some(Ok(json!({ "open": app.ui.timeline.open })));
     }
@@ -42,6 +61,12 @@ pub fn menu(app: &mut PhotocraftApp, id: &str, _params: &Value) -> Option<Result
 /// Render the Timeline panel.
 pub fn windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if !app.ui.timeline.open {
+        return;
+    }
+    if host_bar(app) {
+        // The timeline was created here: the host's bar takes over.
+        app.ui.timeline.open = false;
+        app.ui.timeline.playing = false;
         return;
     }
     let tl = app.session.active().and_then(|d| d.doc.timeline.clone());

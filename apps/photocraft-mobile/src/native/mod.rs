@@ -15,6 +15,7 @@ mod layers;
 pub(crate) mod menu;
 mod rail;
 pub(crate) mod status;
+mod timeline;
 
 use craft_mobile::ui::{Edit, Feature, Panel, PanelId, PanelInfo, PanelRole, ShellFeatures};
 use photocraft_ui_egui::{Drawn, HostChrome, PanelId as PhotoCraftPanel, PhotocraftApp};
@@ -30,11 +31,13 @@ const BRUSH: &str = "brush";
 const DOCUMENTS: &str = "documents";
 /// The tool rail's id.
 const TOOLS: &str = "tools";
+/// The transport bar's id: PhotoCraft's Timeline panel's own.
+const TIMELINE: &str = "timeline";
 
 /// PhotoCraft's own panels the shell draws natively, each with the native panel that stands for
 /// it. The brush popover replaces none of them: it is the brush's settings, not the Brushes
 /// panel's presets.
-const NATIVE_PANELS: [(PhotoCraftPanel, &str); 1] = [(PhotoCraftPanel::LAYERS, LAYERS)];
+const NATIVE_PANELS: [(PhotoCraftPanel, &str); 2] = [(PhotoCraftPanel::LAYERS, LAYERS), (PhotoCraftPanel::TIMELINE, TIMELINE)];
 
 /// The native panel that stands for PhotoCraft's `panel`, if any: for
 /// [`craft_mobile::Platform::open_panel`] when Window › Layers asks for it.
@@ -67,6 +70,8 @@ pub(crate) fn host_chrome(features: ShellFeatures) -> Option<HostChrome> {
 pub(crate) struct Native {
     /// The Layers inspector's drags in progress.
     drags: Drags,
+    /// The transport bar's playback and scrub.
+    player: timeline::Player,
     /// What the shell draws: the Documents inspector and the rail are offered only to a shell that
     /// draws the panels and the rail.
     features: ShellFeatures,
@@ -83,8 +88,9 @@ impl Native {
         self.features.contains(feature)
     }
 
-    /// The panels PhotoCraft offers the shell.
-    pub(crate) fn panels(&self) -> Vec<PanelInfo> {
+    /// The panels PhotoCraft offers the shell: the transport bar too, while the active document
+    /// has a timeline, to a shell that draws the panels (which then shows it).
+    pub(crate) fn panels(&self, app: &PhotocraftApp) -> Vec<PanelInfo> {
         let mut panels = vec![
             PanelInfo { id: LAYERS.into(), title: "Layers".into(), icon: "square.3.layers.3d".into(), role: PanelRole::Inspector },
             PanelInfo { id: BRUSH.into(), title: "Brush".into(), icon: "paintbrush.pointed".into(), role: PanelRole::Tool },
@@ -94,6 +100,9 @@ impl Native {
         }
         if self.features.contains(Feature::Rail) {
             panels.push(PanelInfo { id: TOOLS.into(), title: "Tools".into(), icon: "hammer".into(), role: PanelRole::Rail });
+        }
+        if self.features.contains(Feature::Panels) && timeline::offered(app) {
+            panels.push(PanelInfo { id: TIMELINE.into(), title: "Timeline".into(), icon: "film".into(), role: PanelRole::Transport });
         }
         panels
     }
@@ -106,6 +115,7 @@ impl Native {
             BRUSH => Some(brush::describe(app)),
             DOCUMENTS => Some(documents::describe(app)),
             TOOLS => rail::describe(app),
+            TIMELINE => timeline::describe(app, &self.player),
             _ => None,
         }
     }
@@ -117,9 +127,27 @@ impl Native {
             BRUSH => brush::apply(app, ctx, edit),
             DOCUMENTS => documents::apply(app, ctx, edit),
             TOOLS => rail::apply(app, ctx, edit),
+            TIMELINE => timeline::apply(app, &mut self.player, ctx, edit, now(ctx)),
             other => Err(format!("no native panel `{other}`")),
         }
     }
+
+    /// Once a frame, before PhotoCraft's own logic: move a playing transport's playhead, and ask
+    /// for the next frame while it plays.
+    pub(crate) fn tick(&mut self, app: &mut PhotocraftApp, ctx: &egui::Context) {
+        self.player.tick(app, ctx, now(ctx));
+    }
+
+    /// The app is leaving the screen: pause, so it comes back where it was rather than skip ahead
+    /// by the time away.
+    pub(crate) fn suspend(&mut self) {
+        self.player.pause();
+    }
+}
+
+/// The frame's time, in seconds: the host's monotonic clock (from its start).
+fn now(ctx: &egui::Context) -> f64 {
+    ctx.input(|i| i.time)
 }
 
 /// The key every edit of one gesture shares, so the engine folds them into one step.
@@ -159,24 +187,54 @@ mod tests {
 
     #[test]
     fn every_offered_panel_is_described_and_well_formed() {
-        let (app, mut native) = (app(), Native::default());
+        let (mut app, mut native) = (app(), Native::default());
         native.shell(every_feature());
-        let offered = native.panels();
-        assert_eq!(offered.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), [LAYERS, BRUSH, DOCUMENTS, TOOLS]);
-        for info in offered {
+        let offered = |app: &PhotocraftApp, native: &Native| native.panels(app).into_iter().map(|p| p.id.as_str().to_owned()).collect::<Vec<_>>();
+        assert_eq!(offered(&app, &native), [LAYERS, BRUSH, DOCUMENTS, TOOLS]);
+        assert!(native.describe(&app, &TIMELINE.into()).is_none(), "no timeline, no transport bar");
+        app.run("timeline.create", serde_json::json!({"duration": 10, "fps": 4.0})).unwrap();
+        assert_eq!(offered(&app, &native), [LAYERS, BRUSH, DOCUMENTS, TOOLS, TIMELINE], "the bar, while there's a timeline");
+        for info in native.panels(&app) {
             let panel = native.describe(&app, &info.id).unwrap();
             assert_eq!(panel.id(), &info.id);
+            assert_eq!(serde_json::to_value(&panel).unwrap()["role"], serde_json::to_value(info.role).unwrap());
             panel.check().unwrap();
         }
-        assert!(native.describe(&app, &"timeline".into()).is_none());
     }
 
     /// A shell that draws neither the panels nor the rail (the Compose shell, for now) isn't
-    /// offered the Documents inspector or the rail: PhotoCraft's tabs and toolbar are on screen.
+    /// offered the Documents inspector, the rail or the transport bar: PhotoCraft's tabs, toolbar
+    /// and Timeline panel are on screen.
     #[test]
-    fn documents_and_the_rail_are_for_a_shell_that_draws_them() {
-        let native = Native::default();
-        assert_eq!(native.panels().iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), [LAYERS, BRUSH]);
+    fn documents_the_rail_and_the_transport_are_for_a_shell_that_draws_them() {
+        let (mut app, native) = (app(), Native::default());
+        app.run("timeline.create", serde_json::json!({"duration": 10, "fps": 4.0})).unwrap();
+        assert_eq!(native.panels(&app).iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), [LAYERS, BRUSH]);
+    }
+
+    /// The transport bar's edits reach the timeline through `apply`, and playback through `tick`.
+    #[test]
+    fn the_transport_is_applied_and_ticked() {
+        let (mut app, mut native, ctx) = (app(), Native::default(), egui::Context::default());
+        app.run("timeline.create", serde_json::json!({"duration": 10, "fps": 4.0})).unwrap();
+        let press = |action| Edit {
+            panel: TIMELINE.into(),
+            control: "transport".into(),
+            phase: craft_mobile::ui::Phase::Commit,
+            gesture: 1.into(),
+            value: craft_mobile::ui::EditValue::Transport(action),
+        };
+        native.apply(&mut app, &ctx, &press(craft_mobile::ui::TransportAction::StepForward)).unwrap();
+        let current = |app: &PhotocraftApp| app.session.active().and_then(|st| st.doc.timeline.as_ref()).map(|tl| tl.current);
+        assert_eq!(current(&app), Some(1));
+        native.apply(&mut app, &ctx, &press(craft_mobile::ui::TransportAction::Play)).unwrap();
+        native.tick(&mut app, &ctx);
+        let playing = |app: &PhotocraftApp, native: &Native| {
+            serde_json::to_value(native.describe(app, &TIMELINE.into()).unwrap()).unwrap()["nodes"][0]["playing"].clone()
+        };
+        assert_eq!(playing(&app, &native), true);
+        native.suspend();
+        assert_eq!(playing(&app, &native), false, "leaving the screen pauses");
     }
 
     #[test]
@@ -191,7 +249,7 @@ mod tests {
                 status_bar: Drawn::ByHost,
                 tabs: Drawn::ByHost,
                 dock: Drawn::ByHost,
-                native_panels: vec![PhotoCraftPanel::LAYERS],
+                native_panels: vec![PhotoCraftPanel::LAYERS, PhotoCraftPanel::TIMELINE],
             }
         );
         assert_eq!(host_chrome(ShellFeatures::none()), None, "no features: PhotoCraft draws everything");
@@ -207,7 +265,9 @@ mod tests {
     fn native_panels_map_to_offered_panels() {
         let mut native = Native::default();
         native.shell(every_feature());
-        let offered: Vec<String> = native.panels().into_iter().map(|p| p.id.as_str().to_owned()).collect();
+        let mut app = app();
+        app.run("timeline.create", serde_json::json!({"duration": 10, "fps": 4.0})).unwrap();
+        let offered: Vec<String> = native.panels(&app).into_iter().map(|p| p.id.as_str().to_owned()).collect();
         for id in host_chrome(every_feature()).unwrap().native_panels {
             let mapped = native_panel(id).unwrap();
             assert!(offered.iter().any(|o| o == mapped), "{id} → {mapped}");

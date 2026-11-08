@@ -44,9 +44,10 @@ pub(super) const PANELS: &[(&str, &str, Group)] = &[
     ("brushes", "Brushes", Group::Brushes),
 ];
 
-/// One of PhotoCraft's panels by its id (`PANELS`: "layers", "brushes", …), for a host app that
-/// draws some of them itself ([`crate::HostChrome::native_panels`]). Parsed from its id, so an id
-/// PhotoCraft doesn't have is refused where it's written, not ignored where it's used.
+/// One of PhotoCraft's panels by its id (`PANELS`: "layers", "brushes", …, or the floating
+/// "timeline"), for a host app that draws some of them itself
+/// ([`crate::HostChrome::native_panels`]). Parsed from its id, so an id PhotoCraft doesn't have
+/// is refused where it's written, not ignored where it's used.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PanelId(&'static str);
 
@@ -55,6 +56,8 @@ impl PanelId {
     pub const LAYERS: Self = Self("layers");
     /// The Brushes panel.
     pub const BRUSHES: Self = Self("brushes");
+    /// The Timeline (Window › Timeline): a floating panel, not one of the dock's.
+    pub const TIMELINE: Self = Self("timeline");
 
     /// Its id.
     pub fn as_str(self) -> &'static str {
@@ -85,6 +88,9 @@ impl std::str::FromStr for PanelId {
 
     /// The panel with id `s` exactly ("layers", not "Layers").
     fn from_str(s: &str) -> Result<Self, UnknownPanel> {
+        if s == Self::TIMELINE.0 {
+            return Ok(Self::TIMELINE);
+        }
         PANELS.iter().find(|(id, _, _)| *id == s).map(|(id, _, _)| Self(id)).ok_or_else(|| UnknownPanel(s.to_owned()))
     }
 }
@@ -908,11 +914,12 @@ mod panel_id_tests {
         assert_eq!("layerComps".parse::<PanelId>().map(|p| p.to_string()), Ok("layerComps".to_owned()));
         assert_eq!("Layers".parse::<PanelId>(), Err(UnknownPanel("Layers".into())), "the id, not the label");
         assert_eq!("dock".parse::<PanelId>().unwrap_err().to_string(), "`dock` isn't a PhotoCraft panel");
+        assert_eq!("timeline".parse::<PanelId>(), Ok(PanelId::TIMELINE), "the floating Timeline, though not in the dock");
     }
 
     #[test]
     fn the_named_panels_are_panels() {
-        for panel in [PanelId::LAYERS, PanelId::BRUSHES] {
+        for panel in [PanelId::LAYERS, PanelId::BRUSHES, PanelId::TIMELINE] {
             assert_eq!(panel.as_str().parse::<PanelId>(), Ok(panel));
         }
     }
