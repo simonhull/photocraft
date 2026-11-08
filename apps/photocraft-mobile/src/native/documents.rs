@@ -6,7 +6,7 @@
 //! swipe) closes it, as its tab's Close does: a document with unsaved changes asks first. A row
 //! offers no Rename: a document's name is its file's.
 
-use craft_mobile::ui::{Edit, EditValue, ItemList, Node, Panel, PanelRole, Rename, Row, RowAction, RowId};
+use craft_mobile::ui::{Edit, EditValue, ItemAction, ItemList, Node, Panel, PanelRole, Rename, Row, RowId};
 use photocraft_ui_egui::PhotocraftApp;
 use serde_json::json;
 
@@ -30,7 +30,7 @@ pub(super) fn describe(app: &PhotocraftApp) -> Panel {
                 .selected(active == Some(i))
                 // Its name is its file's: Save As renames it, not the panel.
                 .rename(Rename::No)
-                .actions(vec![RowAction::new(CLOSE, "Close").icon(Some("xmark")).destructive(true)])
+                .actions(vec![ItemAction::new(CLOSE, "Close").icon(Some("xmark")).destructive(true)])
         })
         .collect();
     Panel::new(super::DOCUMENTS, "Documents", PanelRole::Inspector, vec![Node::ItemList(ItemList::new(ROWS, rows))])

@@ -1,7 +1,9 @@
 //! The Layers inspector: the blend mode and opacity of the selected layers (showing the active
 //! layer's), then the layers, top first.
 //!
-//! Each row's context menu has Duplicate and Delete (a swipe too) for that layer alone.
+//! Each row's context menu has Duplicate and Delete (a swipe too) for that layer alone. The list's
+//! footer has New Layer and New Group, which run what the desktop Layers panel's footer buttons run
+//! on a plain click.
 //!
 //! As in the desktop Layers panel ([`prop_targets`]): with several layers selected, blend mode and
 //! Opacity change every one of them but the Background; the Background alone has neither (both
@@ -11,7 +13,7 @@
 use std::collections::HashMap;
 
 use craft_mobile::ui::{
-    Choice, ChoiceOption, Edit, EditValue, GestureId, ItemList, Node, Number, Panel, PanelRole, Phase, Position, Row, RowAction, SelectMode, Unit,
+    Choice, ChoiceOption, Edit, EditValue, GestureId, ItemAction, ItemList, Node, Number, Panel, PanelRole, Phase, Position, Row, SelectMode, Unit,
 };
 use photocraft_color::BlendMode;
 use photocraft_doc::{DocId, Layer, LayerContent, LayerId};
@@ -32,6 +34,11 @@ const ROWS: &str = "rows";
 const DUPLICATE: &str = "duplicate";
 /// A row's Delete: that layer (`layer.delete`).
 const DELETE: &str = "delete";
+/// The list's New Layer: a layer above the active one (`layer.new.layer`).
+const NEW_LAYER: &str = "new_layer";
+/// The list's New Group: an empty group, or the selected layers grouped when there are several
+/// (`layer.new.group` or `layer.groupLayers`).
+const NEW_GROUP: &str = "new_group";
 
 /// One Opacity drag, fixed at its `begin`: the document and layers it edits, each with its
 /// opacity from before the drag. Selecting another layer mid-drag doesn't move the drag there.
@@ -72,7 +79,8 @@ pub(super) fn describe(app: &PhotocraftApp) -> Option<Panel> {
     }
     let mut rows = Vec::new();
     push_rows(&doc.layers, 0, &|id| st.is_layer_selected(id), &mut rows);
-    nodes.push(Node::ItemList(ItemList::new(ROWS, rows).reorderable(true)));
+    let actions = vec![ItemAction::new(NEW_LAYER, "New Layer").icon(Some("plus")), ItemAction::new(NEW_GROUP, "New Group").icon(Some("folder.badge.plus"))];
+    nodes.push(Node::ItemList(ItemList::new(ROWS, rows).reorderable(true).actions(actions)));
     Some(Panel::new(super::LAYERS, "Layers", PanelRole::Inspector, nodes))
 }
 
@@ -87,8 +95,8 @@ fn push_rows(layers: &[Layer], depth: u32, selected: &dyn Fn(LayerId) -> bool, o
                 .visible(Some(layer.visible))
                 .selected(selected(layer.id))
                 .actions(vec![
-                    RowAction::new(DUPLICATE, "Duplicate").icon(Some("plus.square.on.square")),
-                    RowAction::new(DELETE, "Delete").icon(Some("trash")).destructive(true),
+                    ItemAction::new(DUPLICATE, "Duplicate").icon(Some("plus.square.on.square")),
+                    ItemAction::new(DELETE, "Delete").icon(Some("trash")).destructive(true),
                 ]),
         );
         if let LayerContent::Group(group) = &layer.content {
@@ -137,6 +145,13 @@ pub(super) fn apply(app: &mut PhotocraftApp, drags: &mut Drags, ctx: &egui::Cont
         // The row's layer alone, whatever is selected, as the row's menu says.
         (_, EditValue::Action { row, action }, ROWS) if action.as_str() == DUPLICATE => run(app, ctx, "layer.duplicate", json!({"layer": row}), edit),
         (_, EditValue::Action { row, action }, ROWS) if action.as_str() == DELETE => run(app, ctx, "layer.delete", json!({"layer": row}), edit),
+        // The desktop footer's plain clicks (`panels::layers`).
+        (_, EditValue::ListAction { action }, ROWS) if action.as_str() == NEW_LAYER => run(app, ctx, "layer.new.layer", json!({}), edit),
+        (_, EditValue::ListAction { action }, ROWS) if action.as_str() == NEW_GROUP => {
+            let st = active(app)?;
+            let groups = st.active_layer.is_some() && st.selected_layers().len() > 1;
+            run(app, ctx, if groups { "layer.groupLayers" } else { "layer.new.group" }, json!({}), edit)
+        }
         (_, value, control) => Err(format!("layers: `{control}` doesn't take {value:?}")),
     }
 }
@@ -647,6 +662,56 @@ mod tests {
         p.undo();
         assert_eq!(count(&p), 2, "one step");
         assert!(p.apply("rows", Phase::Commit, 3, action("explode")).is_err());
+    }
+
+    /// The list's footer offers New Layer and New Group.
+    #[test]
+    fn the_list_offers_new_layer_and_new_group() {
+        let json = Inspector::new().json();
+        let actions = json["nodes"][2]["actions"].as_array().map(|a| a.iter().map(|x| (x["id"].clone(), x["icon"].clone())).collect::<Vec<_>>());
+        assert_eq!(actions, Some(vec![(json!("new_layer"), json!("plus")), (json!("new_group"), json!("folder.badge.plus"))]), "{json}");
+    }
+
+    /// New Layer is the desktop footer's plain click: a layer above the active one, active, in one
+    /// undo step.
+    #[test]
+    fn new_layer_adds_a_layer_above_the_active_one() {
+        let mut p = Inspector::new();
+        let (top, background) = (p.top, p.background());
+        p.select(background, "replace");
+        p.apply("rows", Phase::Commit, 1, EditValue::ListAction { action: "new_layer".into() }).unwrap();
+        let order: Vec<u64> = p.state().doc.layers.iter().map(|l| l.id.0).collect();
+        let new = p.state().active_layer.unwrap().0;
+        assert_eq!(order, [background, new, top], "above the active Background, bottom first");
+        assert!(matches!(p.layer(new).content, LayerContent::Raster(_)), "a pixel layer");
+        p.undo();
+        assert_eq!(p.state().doc.layers.len(), 2, "one step");
+    }
+
+    /// New Group is the desktop footer's plain click: an empty group with one layer selected, the
+    /// selected layers grouped with several.
+    #[test]
+    fn new_group_adds_a_group_or_groups_the_selection() {
+        let mut p = Inspector::new();
+        let (top, background) = (p.top, p.background());
+        let group = |p: &Inspector| p.state().doc.layers.iter().find(|l| matches!(l.content, LayerContent::Group(_))).map(|l| l.id.0);
+        p.apply("rows", Phase::Commit, 1, EditValue::ListAction { action: "new_group".into() }).unwrap();
+        let empty = group(&p).unwrap();
+        assert_eq!(p.state().doc.layers.len(), 3, "a group beside the layers");
+        assert!(matches!(&p.layer(empty).content, LayerContent::Group(g) if g.children.is_empty()), "empty");
+        p.undo();
+        let other = p.new_layer();
+        p.select(top, "add");
+        p.apply("rows", Phase::Commit, 2, EditValue::ListAction { action: "new_group".into() }).unwrap();
+        let grouped = group(&p).unwrap();
+        let LayerContent::Group(g) = &p.layer(grouped).content else { panic!("not a group") };
+        let mut children: Vec<u64> = g.children.iter().map(|l| l.id.0).collect();
+        children.sort_unstable();
+        let mut expected = vec![top, other];
+        expected.sort_unstable();
+        assert_eq!(children, expected, "the selected layers, in the group");
+        assert_eq!(p.state().doc.layers.first().map(|l| l.id.0), Some(background));
+        assert!(p.apply("rows", Phase::Commit, 3, EditValue::ListAction { action: "explode".into() }).is_err());
     }
 
     #[test]
