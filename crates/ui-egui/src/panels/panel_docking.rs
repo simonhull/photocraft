@@ -44,7 +44,11 @@ pub(super) const PANELS: &[(&str, &str, Group)] = &[
     ("brushes", "Brushes", Group::Brushes),
 ];
 
-/// One of PhotoCraft's panels by its id (`PANELS`: "layers", "brushes", …, or the floating
+/// The panels that float over the window and are never the dock's (Window › Timeline): not laid
+/// out in the dock's groups, unlike [`PANELS`].
+pub(super) const FLOATING: &[&str] = &["timeline"];
+
+/// One of PhotoCraft's panels by its id (`PANELS`: "layers", "brushes", …, or `FLOATING`:
 /// "timeline"), for a host app that draws some of them itself
 /// ([`crate::HostChrome::native_panels`]). Parsed from its id, so an id PhotoCraft doesn't have
 /// is refused where it's written, not ignored where it's used.
@@ -86,12 +90,9 @@ impl std::error::Error for UnknownPanel {}
 impl std::str::FromStr for PanelId {
     type Err = UnknownPanel;
 
-    /// The panel with id `s` exactly ("layers", not "Layers").
+    /// The panel with id `s` exactly ("layers", not "Layers"), the dock's or a floating one.
     fn from_str(s: &str) -> Result<Self, UnknownPanel> {
-        if s == Self::TIMELINE.0 {
-            return Ok(Self::TIMELINE);
-        }
-        PANELS.iter().find(|(id, _, _)| *id == s).map(|(id, _, _)| Self(id)).ok_or_else(|| UnknownPanel(s.to_owned()))
+        PANELS.iter().map(|(id, _, _)| id).chain(FLOATING).find(|id| **id == s).copied().map(Self).ok_or_else(|| UnknownPanel(s.to_owned()))
     }
 }
 
@@ -922,6 +923,19 @@ mod panel_id_tests {
         for panel in [PanelId::LAYERS, PanelId::BRUSHES, PanelId::TIMELINE] {
             assert_eq!(panel.as_str().parse::<PanelId>(), Ok(panel));
         }
+    }
+
+    /// Each panel is the dock's or a floating one, never both: the dock's are laid out in its
+    /// groups, the floating ones never are.
+    #[test]
+    fn every_named_panel_is_docked_or_floating_never_both() {
+        for panel in [PanelId::LAYERS, PanelId::BRUSHES, PanelId::TIMELINE] {
+            let docked = PANELS.iter().any(|(id, _, _)| *id == panel.as_str());
+            let floating = FLOATING.contains(&panel.as_str());
+            assert!(docked != floating, "{panel}: docked {docked}, floating {floating}");
+        }
+        assert!(FLOATING.iter().all(|id| !PANELS.iter().any(|(docked, _, _)| docked == id)), "{FLOATING:?}");
+        assert!(FLOATING.iter().all(|id| id.parse::<PanelId>().is_ok()), "every floating panel parses");
     }
 }
 
