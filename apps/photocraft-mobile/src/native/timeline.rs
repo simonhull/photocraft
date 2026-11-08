@@ -516,6 +516,47 @@ mod tests {
         assert_eq!((current(&app), player.playing.is_some()), (0, false));
     }
 
+    /// A scrub begun under a dialog is refused, and so is its cancel: the playhead never moved,
+    /// and nothing of the scrub is left for a later one to go back to.
+    #[test]
+    fn a_scrub_begun_under_a_dialog_then_cancelled_leaves_the_playhead() {
+        let (mut app, ctx, mut player) = app();
+        app.run("timeline.setFrame", json!({"frame": 3})).unwrap();
+        app.run("edit.fill", json!({"color": "#ff0000"})).unwrap();
+        photocraft_ui_egui::menus::invoke(&mut app, &ctx, "file.close", json!({})).unwrap();
+        let scrub = |player: &mut Player, app: &mut PhotocraftApp, phase, frame| apply(app, player, &ctx, &edit(phase, 7, EditValue::Seek { frame }), 0.0);
+        assert!(scrub(&mut player, &mut app, Phase::Begin, 6).is_err(), "refused under the prompt");
+        assert_eq!(current(&app), 3);
+        assert!(scrub(&mut player, &mut app, Phase::Cancel, 3).is_err(), "the cancel too");
+        assert_eq!(current(&app), 3, "where it was");
+        assert!(player.scrub.is_none(), "the scrub is over");
+    }
+
+    /// Moving the playhead is never a History step, as on the desktop: seeking, stepping, jumping,
+    /// playing and stopping leave the History as it was.
+    #[test]
+    fn moving_the_playhead_adds_no_history() {
+        let (mut app, ctx, mut player) = app();
+        let steps = |app: &PhotocraftApp| app.session.active().unwrap().history.past_len();
+        let before = steps(&app);
+        seek(&mut app, &ctx, &mut player, Phase::Begin, 7, 2);
+        seek(&mut app, &ctx, &mut player, Phase::Change, 7, 5);
+        seek(&mut app, &ctx, &mut player, Phase::Commit, 7, 6);
+        seek(&mut app, &ctx, &mut player, Phase::Begin, 8, 1);
+        seek(&mut app, &ctx, &mut player, Phase::Cancel, 8, 6);
+        assert_eq!(steps(&app), before, "seeks");
+        for action in [TransportAction::StepForward, TransportAction::StepBack, TransportAction::ToEnd, TransportAction::ToStart] {
+            press(&mut app, &ctx, &mut player, action);
+        }
+        assert_eq!(steps(&app), before, "steps and jumps");
+        press_at(&mut app, &ctx, &mut player, TransportAction::Play, 10.0).unwrap();
+        player.tick(&mut app, &ctx, 10.5);
+        assert_eq!(current(&app), 2, "it played");
+        press(&mut app, &ctx, &mut player, TransportAction::Stop);
+        press(&mut app, &ctx, &mut player, TransportAction::Stop);
+        assert_eq!(steps(&app), before, "playing and stopping");
+    }
+
     #[test]
     fn other_edits_are_refused() {
         let (mut app, ctx, mut player) = app();
