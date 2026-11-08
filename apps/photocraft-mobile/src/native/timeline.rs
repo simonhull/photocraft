@@ -10,6 +10,8 @@
 //! duration (the desktop panel ignores the work area too). Any step, seek or jump pauses; Stop
 //! pauses, and pressed again while paused goes back to the first frame.
 
+use std::time::Duration;
+
 use craft_mobile::ui::{Edit, EditValue, FrameRange, GestureId, Node, Panel, PanelRole, Phase, Playback, Rate, TimeFormat, Transport, TransportAction};
 use photocraft_doc::{DocId, Timeline};
 use photocraft_ui_egui::PhotocraftApp;
@@ -61,7 +63,8 @@ impl Player {
     }
 
     /// Move the playhead to the frame due at `now` (seconds on a monotonic clock, the one
-    /// [`apply`] was given), and ask for the next frame while playing; nothing while paused.
+    /// [`apply`] was given), and ask for a frame when the next one is due while playing (not every
+    /// display refresh); nothing while paused.
     ///
     /// Playback stops once the active document is another (or none), its timeline is gone or has
     /// another length or rate, or the move is refused (a dialog came up). A playhead moved from
@@ -85,8 +88,25 @@ impl Player {
             self.playing = None;
             return;
         }
-        ctx.request_repaint();
+        if let Some(due) = playing.clock.next_due(now) {
+            ctx.request_repaint_after(wake_after(due));
+        }
     }
+}
+
+/// How much early to wake for a frame. The host wakes at the first display refresh after the
+/// delay, timed from when it hears of the request, a little after the frame's `now`: waking late
+/// would miss a refresh and show the frame one late, while waking early costs at most one more
+/// pass that finds it not yet due and asks again.
+const WAKE_EARLY: Duration = Duration::from_millis(2);
+
+/// The longest wait for a frame: a clock slower than a frame an hour is as good as stopped.
+const LONGEST_WAIT: Duration = Duration::from_secs(3600);
+
+/// The repaint delay for a frame due in `due` seconds: [`WAKE_EARLY`] sooner, at most
+/// [`LONGEST_WAIT`], and never zero, which egui answers with two frames rather than one.
+fn wake_after(due: f64) -> Duration {
+    Duration::try_from_secs_f64(due.min(LONGEST_WAIT.as_secs_f64())).unwrap_or_default().saturating_sub(WAKE_EARLY).max(Duration::from_nanos(1))
 }
 
 /// A timeline's frames as the transport counts them: never empty, the playhead inside, the work
@@ -385,27 +405,46 @@ mod tests {
     }
 
     #[test]
-    fn frames_keep_coming_only_while_playing() {
-        use std::sync::Arc;
-        use std::sync::atomic::{AtomicBool, Ordering};
+    fn frames_come_when_due_and_only_while_playing() {
+        use std::sync::{Arc, Mutex};
         let (mut app, ctx, mut player) = app();
-        // As the host hears of it: the next frame is due when the callback says.
-        let woken = Arc::new(AtomicBool::new(false));
-        let wake = woken.clone();
+        // As the host hears of it: the next frame is due when the callback says, a tick being part
+        // of a frame (egui only calls back for a sooner frame than one already asked for).
+        let asked = Arc::new(Mutex::new(None));
+        let wake = asked.clone();
         ctx.set_request_repaint_callback(move |info| {
-            if info.delay.is_zero() {
-                wake.store(true, Ordering::Relaxed);
-            }
+            *wake.lock().unwrap() = Some(info.delay);
         });
-        let asked = |_: &egui::Context| woken.swap(false, Ordering::Relaxed);
-        player.tick(&mut app, &ctx, 1.0);
-        assert!(!asked(&ctx), "paused: no frames asked for");
+        let pass = |run: &mut dyn FnMut(&egui::Context)| ctx.run_ui(egui::RawInput::default(), |ui| run(ui.ctx())).textures_delta.clear();
+        let frame = |app: &mut PhotocraftApp, player: &mut Player, now: f64| {
+            // Two frames see off any repaint already asked for.
+            pass(&mut |_| {});
+            pass(&mut |_| {});
+            asked.lock().unwrap().take();
+            pass(&mut |ctx| player.tick(app, ctx, now));
+            asked.lock().unwrap().take()
+        };
+        assert_eq!(frame(&mut app, &mut player, 1.0), None, "paused: no frames asked for");
         press_at(&mut app, &ctx, &mut player, TransportAction::Play, 1.0).unwrap();
-        player.tick(&mut app, &ctx, 1.1);
-        assert!(asked(&ctx), "playing: the next frame");
+        let delay = frame(&mut app, &mut player, 1.0).expect("playing: the next frame");
+        assert!((Duration::from_millis(245)..Duration::from_millis(250)).contains(&delay), "a frame period, a little early: {delay:?}");
+        let delay = frame(&mut app, &mut player, 1.1).expect("part-way through the frame");
+        assert!((Duration::from_millis(145)..Duration::from_millis(150)).contains(&delay), "the rest of it: {delay:?}");
+        let delay = frame(&mut app, &mut player, 1.249_9).expect("a hair before the next frame");
+        assert!(!delay.is_zero() && delay < Duration::from_millis(1), "at once, but not zero (egui answers that with two frames): {delay:?}");
         press(&mut app, &ctx, &mut player, TransportAction::Pause);
-        player.tick(&mut app, &ctx, 1.2);
-        assert!(!asked(&ctx));
+        assert_eq!(frame(&mut app, &mut player, 1.3), None, "paused again");
+    }
+
+    #[test]
+    fn the_wake_is_early_bounded_and_never_zero() {
+        assert_eq!(wake_after(0.25), Duration::from_millis(248));
+        assert_eq!(wake_after(0.001), Duration::from_nanos(1), "due within the margin: at once");
+        assert_eq!(wake_after(0.0), Duration::from_nanos(1));
+        let longest = Duration::from_millis(3_599_998);
+        assert_eq!(wake_after(f64::INFINITY), longest, "an absurdly slow rate");
+        assert_eq!(wake_after(-1.0), Duration::from_nanos(1));
+        assert_eq!(wake_after(f64::NAN), longest);
     }
 
     #[test]
