@@ -143,7 +143,11 @@ macro_rules! spec {
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         spec!("timeline.create", "Create Video Timeline", r#"{duration?:30, fps?:30} → {timeline}"#, has_doc, |s, p| create(s, p)),
-        spec!("timeline.delete", "Delete Timeline", "{} → {timeline:null}", has_timeline, |s, _| delete(s)),
+        // Also in Layer › Video Layers, after New Blank Video Layer: where a host's own timeline bar
+        // stands in for the Timeline panel, the panel's Delete button isn't on screen.
+        CommandSpec {
+            menu: &["Layer", "Video Layers"], ..spec!("timeline.delete", "Delete Timeline", "{} → {timeline:null}", has_timeline, |s, _| delete(s))
+        },
         spec!("timeline.setFrame", "Go to Frame", r#"{frame} → {timeline}"#, has_timeline, |s, p| set_frame(s, p)),
         spec!("timeline.nextFrame", "Next Frame", "{} → {timeline}", has_timeline, |s, _| step(s, 1)),
         spec!("timeline.previousFrame", "Previous Frame", "{} → {timeline}", has_timeline, |s, _| step(s, -1)),

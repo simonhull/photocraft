@@ -129,6 +129,32 @@ fn color_to_alpha_sits_in_filter_other_after_offset() {
     assert!(!others.iter().any(|p| p.as_str() == "Other"), "no duplicate Other submenu: {others:?}");
 }
 
+/// Delete Timeline is in Layer › Video Layers after New Blank Video Layer (which makes a timeline),
+/// enabled only while the document has a timeline, and choosing it deletes the timeline: the way
+/// to it where the Timeline panel isn't shown (a host's own timeline bar stands for it).
+#[test]
+fn delete_timeline_sits_in_video_layers_after_new_blank_video_layer() {
+    let ctx = egui::Context::default();
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+    let item = |app: &PhotocraftApp| {
+        let items = menu_items(app);
+        let at = |id: &str| items.iter().position(|i| i.id == id).unwrap_or_else(|| panic!("{id} missing"));
+        let (blank, delete) = (at("layer.videoLayers.newBlankVideoLayer"), at("timeline.delete"));
+        assert_eq!(delete, blank + 1);
+        assert_eq!(items[delete].path, ["Layer", "Video Layers"]);
+        assert_eq!(items[delete].label, "Delete Timeline");
+        items[delete].enabled
+    };
+    assert!(!item(&app), "no document");
+    app.run("file.new", json!({"width": 32, "height": 32})).unwrap();
+    assert!(!item(&app), "no timeline");
+    app.run("timeline.create", json!({"duration": 10, "fps": 12.0})).unwrap();
+    assert!(item(&app), "a timeline to delete");
+    invoke(&mut app, &ctx, "timeline.delete", json!({})).unwrap();
+    assert!(app.session.active().unwrap().doc.timeline.is_none(), "deleted");
+    assert!(!item(&app), "nothing left to delete");
+}
+
 #[test]
 fn menu_bar_labels_have_horizontal_padding_and_open_menus() {
     use egui_kittest::{Harness, kittest::Queryable};

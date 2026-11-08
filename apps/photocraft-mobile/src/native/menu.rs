@@ -167,6 +167,18 @@ mod tests {
         assert!(submenu, "submenus kept");
     }
 
+    /// The native Timeline bar has no Delete button: Layer › Video Layers › Delete Timeline is the
+    /// way, live while there's a timeline.
+    #[test]
+    fn delete_timeline_is_in_the_menus_while_there_is_a_timeline() {
+        let mut app = app();
+        assert_eq!(command(&converted(&app), "timeline.delete").unwrap()["enabled"], false, "no timeline");
+        app.run("timeline.create", json!({"duration": 10, "fps": 4.0})).unwrap();
+        let bar = converted(&app);
+        let delete = command(&bar, "timeline.delete").unwrap();
+        assert_eq!((&delete["label"], &delete["enabled"]), (&json!("Delete Timeline"), &json!(true)), "{delete}");
+    }
+
     /// A tool key or another bare key is the canvas's: no menu takes it.
     #[test]
     fn only_command_keys_and_function_keys_are_menu_shortcuts() {
