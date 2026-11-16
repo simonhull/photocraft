@@ -1192,7 +1192,7 @@ mod tests {
     impl Hosted {
         fn new() -> Self {
             let ctx = egui::Context::default();
-            let mut app = PhotoCraftMobile::create(&ctx, None, Platform::default());
+            let mut app = PhotoCraftMobile::create(&ctx, None, Platform::default(), None);
             app.app.run("file.new", json!({"width": 8, "height": 8})).expect("a document");
             Self { app, ctx, frame: eframe::Frame::_new_kittest() }
         }
