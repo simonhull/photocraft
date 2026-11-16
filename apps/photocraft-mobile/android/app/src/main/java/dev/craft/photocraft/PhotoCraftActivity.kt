@@ -9,7 +9,12 @@ import dev.craft.kit.CraftHost
 import dev.craft.kit.CraftScaffold
 import dev.craft.kit.CraftTheme
 
-/** PhotoCraft on Android: craftkit's shell around the Rust app, plus a New button. */
+/**
+ * PhotoCraft on Android: craftkit's shell around the Rust app. The shell draws the chrome natively
+ * (Material 3), described by the Rust app: PhotoCraft's menus in the app bar, its tools as a rail,
+ * the Layers and Documents inspectors and the brush popover, the timeline's transport bar, and the
+ * status as snackbars and progress. egui draws just the canvas.
+ */
 class PhotoCraftActivity : ComponentActivity() {
     private lateinit var host: CraftHost
 
@@ -21,8 +26,7 @@ class PhotoCraftActivity : ComponentActivity() {
         if (savedInstanceState == null) host.openIntent(intent)
         setContent {
             CraftTheme {
-                // PhotoCraft draws its own menus and panels: no native chrome on top.
-                CraftScaffold(host, appName = "PhotoCraft")
+                CraftScaffold(host, appName = "PhotoCraft", nativePanels = true, menus = true, rail = true, status = true)
             }
         }
     }
