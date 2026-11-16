@@ -260,7 +260,7 @@ struct PendingWrite {
 }
 
 impl CraftApp for PhotoCraftMobile {
-    fn create(ctx: &egui::Context, wgpu: Option<eframe::egui_wgpu::RenderState>, platform: Platform) -> Self {
+    fn create(ctx: &egui::Context, wgpu: Option<eframe::egui_wgpu::RenderState>, platform: Platform, _storage: Option<&dyn eframe::Storage>) -> Self {
         let (inbox, located, issued, encoded) = (Inbox::default(), Located::default(), Issued::default(), Encoded::default());
         let (suspended, pastes, own_copy) = (Shared::<Suspended>::default(), Shared::<Pastes>::default(), OwnCopy::default());
         let writing = Shared::<Vec<PendingWrite>>::default();
