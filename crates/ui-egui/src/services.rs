@@ -423,6 +423,10 @@ pub struct HostMenuItem {
 /// Whether a [`HostMenu`] item can run now.
 pub type HostEnabledFn = Box<dyn Fn(&crate::PhotocraftApp, &str) -> bool>;
 
+/// [`HostMenu::checked`]: `Some` with a command's check mark when the host decides it, `None` to
+/// let PhotoCraft.
+pub type HostCheckedFn = Box<dyn Fn(&crate::PhotocraftApp, &str) -> Option<bool>>;
+
 /// [`HostMenu::run`]: `Some` with the outcome when the host ran the command, `None` to let
 /// PhotoCraft run it.
 pub type HostRunFn = Box<dyn FnMut(&mut crate::PhotocraftApp, &egui::Context, &str, &Value) -> Option<Result<Value, String>>>;
@@ -430,12 +434,15 @@ pub type HostRunFn = Box<dyn FnMut(&mut crate::PhotocraftApp, &egui::Context, &s
 /// What the host app brings to the menus: items of its own (a tablet shell's File › Share…), and
 /// the first say over every command run through [`crate::menus::invoke`] (menus, shortcuts, the
 /// command palette), so it can run one its own way (Edit › Paste reading a clipboard that answers
-/// later). A command the host runs from `run` through `invoke` is PhotoCraft's own.
+/// later), and over every command's check mark (one it runs its own way shows the host's state).
+/// A command the host runs from `run` through `invoke` is PhotoCraft's own.
 pub struct HostMenu {
     /// The items, each after the item it names.
     pub items: Vec<HostMenuItem>,
     /// Whether one of [`Self::items`] can run now.
     pub enabled: HostEnabledFn,
+    /// A command's check mark first: one it takes over in [`Self::run`] whose state is its own.
+    pub checked: HostCheckedFn,
     /// Runs a command first: every one of [`Self::items`], and any other it takes over.
     pub run: HostRunFn,
 }

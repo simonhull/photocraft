@@ -30,6 +30,11 @@ pub(super) fn is_enabled(app: &PhotocraftApp, id: &str) -> Option<bool> {
     host.items.iter().any(|i| i.id == id).then(|| (host.enabled)(app, id))
 }
 
+/// The host's check mark for `id`, when it decides it.
+pub(super) fn checked(app: &PhotocraftApp, id: &str) -> Option<bool> {
+    (app.services.host_menu.as_ref()?.checked)(app, id)
+}
+
 /// Lets the host run `id` first: `Some` when it did. While it runs, commands it invokes are
 /// PhotoCraft's own.
 pub(super) fn run(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: &Value) -> Option<Result<Value, String>> {
@@ -51,7 +56,8 @@ mod tests {
     use super::*;
 
     /// A host's item sits after the one it names, in its submenu, enabled as the host says; the
-    /// host runs it, may take over any other command, and its own nested runs are PhotoCraft's.
+    /// host runs it, may take over any other command (and its check mark), and its own nested runs
+    /// are PhotoCraft's.
     #[test]
     fn host_items_join_the_menus_and_the_host_runs_commands_first() {
         let seen = Rc::new(RefCell::new(Vec::<String>::new()));
@@ -59,6 +65,7 @@ mod tests {
         let host = HostMenu {
             items: vec![HostMenuItem { id: "host.share".into(), label: "Share…".into(), after: "file.saveACopy".into() }],
             enabled: Box::new(|app, _| app.session.active().is_some()),
+            checked: Box::new(|_, id| (id == "view.rulers").then_some(true)),
             run: Box::new(move |app, ctx, id, _| {
                 log.borrow_mut().push(id.to_string());
                 match id {
@@ -86,5 +93,8 @@ mod tests {
         assert!(crate::menus::invoke(&mut app, &ctx, "select.all", json!({})).is_ok(), "not taken over: PhotoCraft runs it");
         assert_eq!(*seen.borrow(), ["edit.paste", "host.share", "select.all"], "file.new ran inside the host's run, as PhotoCraft's");
         assert!(app.services.host_menu.is_some(), "the host is back after each run");
+        let checked = |id: &str| crate::menus::menu_items(&app).into_iter().find(|i| i.id == id).and_then(|i| i.checked);
+        assert_eq!(checked("view.rulers"), Some(true), "the host's check mark");
+        assert_eq!(checked("view.show.grid"), Some(app.ui.extras.grid), "PhotoCraft's, where the host has none");
     }
 }

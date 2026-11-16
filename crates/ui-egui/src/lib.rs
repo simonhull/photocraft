@@ -260,8 +260,8 @@ pub(crate) use services::saved_revision_after_write;
 pub use services::{
     AdoptAutosaveFn, AppendTextFn, AutomationCommandFn, AutomationOpenPcraftFn, AutomationReadFn, AutomationWriteFn, AutosaveFn, AutosaveResultsFn, CapsLockFn,
     CaptionStyleFn, ClipboardGetFn, ClipboardGetSvgFn, ClipboardSetFn, ClipboardUnreadableFn, CursorPosFn, DiscardAutosaveFn, Drawn, EncodePngFn, ExportFn,
-    ExportSettings, ExternalSvgEditor, ExternalSvgSession, ExternalVectorSave, ExternalVectorSource, FileStamp, FileStampFn, FormatChoices, HostChrome,
-    HostEnabledFn, HostMenu, HostMenuItem, HostRunFn, ImportFn, Inbox, LoadTextFn, OpenExternalSvgFn, OpenHostPanelFn, OpenUrlFn, OsEventsFn,
+    ExportSettings, ExternalSvgEditor, ExternalSvgSession, ExternalVectorSave, ExternalVectorSource, FileStamp, FileStampFn, FormatChoices, HostCheckedFn,
+    HostChrome, HostEnabledFn, HostMenu, HostMenuItem, HostRunFn, ImportFn, Inbox, LoadTextFn, OpenExternalSvgFn, OpenHostPanelFn, OpenUrlFn, OsEventsFn,
     PhotoshopShortcutsFn, PlaceInbox, QuitFn, RecoverFn, Recoverable, RightButtonDownFn, SameFileFn, SaveFileFn, SaveTextFn, Services, SystemThemeFn,
     TabletPollFn, WindowFrameFn, WriteFn, WritePendingFn,
 };

@@ -707,6 +707,7 @@ fn tablet_menus(services: &mut Services, platform: &Platform, pastes: Shared<Pas
     services.host_menu = Some(HostMenu {
         items,
         enabled: Box::new(|app, id| id != SHARE || app.session.active().is_some()),
+        checked: Box::new(|_, _| None),
         run: Box::new(move |app, ctx, id, params| match id {
             IMPORT_PHOTOS => {
                 shell.pick_photos();
