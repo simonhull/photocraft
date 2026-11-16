@@ -16,12 +16,20 @@ pub(crate) mod menu;
 mod rail;
 pub(crate) mod status;
 mod timeline;
+pub(crate) mod timeline_bar;
+
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use craft_mobile::ui::{Edit, Feature, Panel, PanelId, PanelInfo, PanelRole, ShellFeatures};
 use photocraft_ui_egui::{Drawn, HostChrome, PanelId as PhotoCraftPanel, PhotocraftApp};
 use serde_json::Value;
 
 pub(crate) use layers::Drags;
+pub(crate) use timeline_bar::TimelineBar;
+
+/// Whether the transport bar shows: the panels' and the menus' (Window › Timeline) to share.
+pub(crate) type SharedBar = Rc<RefCell<TimelineBar>>;
 
 /// The Layers inspector's id.
 const LAYERS: &str = "layers";
@@ -72,12 +80,24 @@ pub(crate) struct Native {
     drags: Drags,
     /// The transport bar's playback and scrub.
     player: timeline::Player,
+    /// Whether the transport bar shows, which Window › Timeline changes.
+    bar: SharedBar,
     /// What the shell draws: the Documents inspector and the rail are offered only to a shell that
     /// draws the panels and the rail.
     features: ShellFeatures,
 }
 
 impl Native {
+    /// The native panels, the transport bar showing or not as `bar` says.
+    pub(crate) fn new(bar: TimelineBar) -> Self {
+        Self { bar: Rc::new(RefCell::new(bar)), ..Self::default() }
+    }
+
+    /// Whether the transport bar shows, for Window › Timeline to change.
+    pub(crate) fn bar(&self) -> SharedBar {
+        Rc::clone(&self.bar)
+    }
+
     /// The shell draws `features`.
     pub(crate) fn shell(&mut self, features: ShellFeatures) {
         self.features = features;
@@ -88,8 +108,9 @@ impl Native {
         self.features.contains(feature)
     }
 
-    /// The panels PhotoCraft offers the shell: the transport bar too, while the active document
-    /// has a timeline, to a shell that draws the panels (which then shows it).
+    /// The panels PhotoCraft offers the shell: the transport bar too, to a shell that draws the
+    /// panels (which then shows it), while the active document has a timeline and its bar is
+    /// shown ([`TimelineBar`]).
     pub(crate) fn panels(&self, app: &PhotocraftApp) -> Vec<PanelInfo> {
         let mut panels = vec![
             PanelInfo { id: LAYERS.into(), title: "Layers".into(), icon: "square.3.layers.3d".into(), role: PanelRole::Inspector },
@@ -101,7 +122,7 @@ impl Native {
         if self.features.contains(Feature::Rail) {
             panels.push(PanelInfo { id: TOOLS.into(), title: "Tools".into(), icon: "hammer".into(), role: PanelRole::Rail });
         }
-        if self.features.contains(Feature::Panels) && timeline::offered(app) {
+        if self.features.contains(Feature::Panels) && timeline::offered(app) && self.bar.borrow().shows(app) {
             panels.push(PanelInfo { id: TIMELINE.into(), title: "Timeline".into(), icon: "film".into(), role: PanelRole::Transport });
         }
         panels
@@ -132,9 +153,17 @@ impl Native {
         }
     }
 
-    /// Once a frame, before PhotoCraft's own logic: move a playing transport's playhead, and ask
-    /// for the next frame while it plays.
+    /// Once a frame, before PhotoCraft's own logic: settle the active document's bar, pause once
+    /// it is hidden, move a playing transport's playhead, and ask for the next frame while it
+    /// plays.
     pub(crate) fn tick(&mut self, app: &mut PhotocraftApp, ctx: &egui::Context) {
+        let mut bar = self.bar.borrow_mut();
+        bar.note(app);
+        if !bar.shows(app) {
+            // Playback is the bar's: hidden, it pauses, rather than move a playhead no one sees.
+            self.player.pause();
+        }
+        drop(bar);
         self.player.tick(app, ctx, now(ctx));
     }
 
@@ -192,8 +221,11 @@ mod tests {
         let offered = |app: &PhotocraftApp, native: &Native| native.panels(app).into_iter().map(|p| p.id.as_str().to_owned()).collect::<Vec<_>>();
         assert_eq!(offered(&app, &native), [LAYERS, BRUSH, DOCUMENTS, TOOLS]);
         assert!(native.describe(&app, &TIMELINE.into()).is_none(), "no timeline, no transport bar");
+        app.set_host_chrome(host_chrome(every_feature()));
         app.run("timeline.create", serde_json::json!({"duration": 10, "fps": 4.0})).unwrap();
-        assert_eq!(offered(&app, &native), [LAYERS, BRUSH, DOCUMENTS, TOOLS, TIMELINE], "the bar, while there's a timeline");
+        assert_eq!(offered(&app, &native), [LAYERS, BRUSH, DOCUMENTS, TOOLS], "a timeline, but the bar is hidden until asked for");
+        assert_eq!(native.bar().borrow_mut().toggle(&app), Some(true), "Window › Timeline");
+        assert_eq!(offered(&app, &native), [LAYERS, BRUSH, DOCUMENTS, TOOLS, TIMELINE], "the bar, once shown");
         for info in native.panels(&app) {
             let panel = native.describe(&app, &info.id).unwrap();
             assert_eq!(panel.id(), &info.id);
@@ -215,7 +247,7 @@ mod tests {
     /// The transport bar's edits reach the timeline through `apply`, and playback through `tick`.
     #[test]
     fn the_transport_is_applied_and_ticked() {
-        let (mut app, mut native, ctx) = (app(), Native::default(), egui::Context::default());
+        let (mut app, mut native, ctx) = (app(), Native::new(TimelineBar::new(true)), egui::Context::default());
         app.run("timeline.create", serde_json::json!({"duration": 10, "fps": 4.0})).unwrap();
         let press = |action| Edit {
             panel: TIMELINE.into(),
@@ -235,6 +267,35 @@ mod tests {
         assert_eq!(playing(&app, &native), true);
         native.suspend();
         assert_eq!(playing(&app, &native), false, "leaving the screen pauses");
+    }
+
+    /// Hiding the bar pauses playback, on the next tick, before the playhead moves again; showing
+    /// it again leaves it paused.
+    #[test]
+    fn hiding_the_bar_pauses() {
+        let (mut app, mut native, ctx) = (app(), Native::default(), egui::Context::default());
+        native.shell(every_feature());
+        app.set_host_chrome(host_chrome(every_feature()));
+        app.run("timeline.create", serde_json::json!({"duration": 10, "fps": 4.0})).unwrap();
+        native.bar().borrow_mut().toggle(&app);
+        let play = Edit {
+            panel: TIMELINE.into(),
+            control: "transport".into(),
+            phase: craft_mobile::ui::Phase::Commit,
+            gesture: 1.into(),
+            value: craft_mobile::ui::EditValue::Transport(craft_mobile::ui::TransportAction::Play),
+        };
+        native.apply(&mut app, &ctx, &play).unwrap();
+        native.tick(&mut app, &ctx);
+        let playing = |app: &PhotocraftApp, native: &Native| {
+            serde_json::to_value(native.describe(app, &TIMELINE.into()).unwrap()).unwrap()["nodes"][0]["playing"].clone()
+        };
+        assert_eq!(playing(&app, &native), true, "playing while shown");
+        assert_eq!(native.bar().borrow_mut().toggle(&app), Some(false));
+        native.tick(&mut app, &ctx);
+        assert!(!native.panels(&app).iter().any(|p| p.id.as_str() == TIMELINE), "hidden");
+        native.bar().borrow_mut().toggle(&app);
+        assert_eq!(playing(&app, &native), false, "paused when hidden");
     }
 
     #[test]
@@ -263,7 +324,7 @@ mod tests {
     /// panel PhotoCraft offers.
     #[test]
     fn native_panels_map_to_offered_panels() {
-        let mut native = Native::default();
+        let mut native = Native::new(TimelineBar::new(true));
         native.shell(every_feature());
         let mut app = app();
         app.run("timeline.create", serde_json::json!({"duration": 10, "fps": 4.0})).unwrap();

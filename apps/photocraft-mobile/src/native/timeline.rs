@@ -1,8 +1,8 @@
 //! The transport bar: the active document's timeline (Window › Timeline), with Play, Stop,
 //! stepping and a scrubber.
 //!
-//! Offered while the active document has a timeline, so the shell shows the bar whenever there is
-//! a playhead to paint at. Every move of the playhead is an engine `timeline.*` command, run as a
+//! Offered while the active document has a timeline and Window › Timeline has the bar shown
+//! ([`super::TimelineBar`]): the shell shows the bar while it is offered. Every move of the playhead is an engine `timeline.*` command, run as a
 //! menu click runs it (refused under a dialog); none is undoable, as on the desktop.
 //!
 //! Playing is the adapter's own state, as it is the desktop Timeline panel's: [`Player`] holds a

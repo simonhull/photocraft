@@ -38,8 +38,9 @@
 //!   parts of PhotoCraft's (its host chrome), and egui draws just the canvas: the menus go to the
 //!   iPad menu bar and run as the macOS menu bar's do, the toolbar becomes the tool rail, the tabs
 //!   the Documents inspector, the status bar the shell's toasts and progress. Window › Layers
-//!   opens the native inspector; a document's timeline shows as the shell's transport bar, played
-//!   from here; every other panel, and the options bar, opens on demand as a floating card over
+//!   opens the native inspector; Window › Timeline shows or hides a document's timeline as the
+//!   shell's transport bar, played from here (hidden until asked for, then per document; hiding it
+//!   pauses); every other panel, and the options bar, opens on demand as a floating card over
 //!   the canvas.
 //! - **Power:** while the device is hot or saving power, live previews run on a reduced copy
 //!   (Preferences › Performance › Low Resolution Previews), whatever the preference says.
@@ -260,12 +261,15 @@ struct PendingWrite {
 }
 
 impl CraftApp for PhotoCraftMobile {
-    fn create(ctx: &egui::Context, wgpu: Option<eframe::egui_wgpu::RenderState>, platform: Platform, _storage: Option<&dyn eframe::Storage>) -> Self {
+    /// Settings: whether the transport bar showed last ([`native::timeline_bar::SETTING`]).
+    fn create(ctx: &egui::Context, wgpu: Option<eframe::egui_wgpu::RenderState>, platform: Platform, storage: Option<&dyn eframe::Storage>) -> Self {
         let (inbox, located, issued, encoded) = (Inbox::default(), Located::default(), Issued::default(), Encoded::default());
         let (suspended, pastes, own_copy) = (Shared::<Suspended>::default(), Shared::<Pastes>::default(), OwnCopy::default());
         let writing = Shared::<Vec<PendingWrite>>::default();
+        let bar_shown = storage.and_then(|s| s.get_string(native::timeline_bar::SETTING)).is_some_and(|v| v == "true");
+        let native = native::Native::new(native::TimelineBar::new(bar_shown));
         let mut services = services(&platform, inbox.clone(), located.clone(), issued.clone(), writing.clone(), encoded.clone(), suspended.clone());
-        tablet_menus(&mut services, &platform, pastes.clone(), own_copy.clone());
+        tablet_menus(&mut services, &platform, pastes.clone(), own_copy.clone(), native.bar());
         let app = create_app(ctx, wgpu, services);
         Self {
             app,
@@ -280,7 +284,7 @@ impl CraftApp for PhotoCraftMobile {
             pastes,
             answered: None,
             own_copy,
-            native: native::Native::default(),
+            native,
             menu_events: native::menu::MenuEvents::default(),
             said: native::status::Said::default(),
         }
@@ -518,6 +522,11 @@ fn layer_rows(layers: &[Layer], depth: u32, selected: &dyn Fn(photocraft_doc::La
 }
 
 impl eframe::App for PhotoCraftMobile {
+    /// Whether the transport bar showed last, for documents opened with a timeline next time.
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        storage.set_string(native::timeline_bar::SETTING, self.native.bar().borrow().last().to_string());
+    }
+
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
         let pasted = self.platform.pasted();
         self.answered = update(&self.pastes, |p| p.answered(pasted.is_some()));
@@ -685,8 +694,9 @@ fn share(app: &mut PhotocraftApp, ctx: &egui::Context, next: &Shared<Option<Stri
     shared
 }
 
-/// The tablet's File › Import from Photos… and File › Share…, and the clipboard read on paste.
-fn tablet_menus(services: &mut Services, platform: &Platform, pastes: Shared<Pastes>, own_copy: OwnCopy) {
+/// The tablet's File › Import from Photos… and File › Share…, the clipboard read on paste, and
+/// Window › Timeline showing or hiding the shell's transport bar (`bar`).
+fn tablet_menus(services: &mut Services, platform: &Platform, pastes: Shared<Pastes>, own_copy: OwnCopy, bar: native::SharedBar) {
     let reader = platform.clone();
     services.clipboard_get_image = Some(Box::new(move || match reader.pasted().as_deref() {
         Some(Pasted::Image { width, height, rgba }) => Ok(Some((*width, *height, rgba.clone()))),
@@ -707,13 +717,17 @@ fn tablet_menus(services: &mut Services, platform: &Platform, pastes: Shared<Pas
     services.host_menu = Some(HostMenu {
         items,
         enabled: Box::new(|app, id| id != SHARE || app.session.active().is_some()),
-        checked: Box::new(|_, _| None),
+        checked: {
+            let bar = Rc::clone(&bar);
+            Box::new(move |app, id| bar.borrow().checked(app, id))
+        },
         run: Box::new(move |app, ctx, id, params| match id {
             IMPORT_PHOTOS => {
                 shell.pick_photos();
                 Some(Ok(Value::Null))
             }
             SHARE => Some(share(app, ctx, &next)),
+            native::timeline_bar::COMMAND => bar.borrow_mut().toggle(app).map(|shown| Ok(json!({ "shown": shown }))),
             // Typing in a type layer: PhotoCraft asks for the clipboard's text itself.
             id if reads_clipboard(id) && app.ui.text_edit.is_none() && !update(&pastes, |p| p.run(id, params, shell.pasted().is_some())) => {
                 shell.request_paste();
@@ -1266,6 +1280,60 @@ mod tests {
         h.frame(|app, ctx| app.command(ctx, &"window.toggle.color".into()).expect("queued"));
         h.frame(|_, _| {});
         assert!(h.app.app.ui.panels.color, "Window › Color's card is open");
+    }
+
+    /// Settings kept in memory, as the host's storage keeps them on disk.
+    #[derive(Default)]
+    struct Settings(HashMap<String, String>);
+
+    impl eframe::Storage for Settings {
+        fn get_string(&self, key: &str) -> Option<String> {
+            self.0.get(key).cloned()
+        }
+
+        fn set_string(&mut self, key: &str, value: String) {
+            self.0.insert(key.to_owned(), value);
+        }
+
+        fn remove_string(&mut self, key: &str) {
+            self.0.remove(key);
+        }
+
+        fn flush(&mut self) {}
+    }
+
+    /// Window › Timeline, from the shell's menu, shows and hides the transport bar, checked while
+    /// it shows; the last choice is saved, and a document opened with a timeline next launch
+    /// starts with it.
+    #[test]
+    fn window_timeline_shows_and_hides_the_transport_bar() {
+        let mut h = Hosted::new();
+        h.shell(every_feature());
+        h.frame(|app, _| app.app.run("timeline.create", json!({"duration": 10, "fps": 4.0})).map(drop).expect("a timeline"));
+        // Opened, not made here: as if it came from a file with its timeline.
+        let mut h2 = Hosted::new();
+        h2.app.app.run("timeline.create", json!({"duration": 10, "fps": 4.0})).expect("a timeline");
+        h2.shell(every_feature());
+        let offered = |h: &Hosted| h.app.panels().iter().any(|p| p.id.as_str() == "timeline");
+        let checked =
+            |h: &Hosted| photocraft_ui_egui::menus::menu_items(&h.app.app).into_iter().find(|i| i.id == native::timeline_bar::COMMAND).and_then(|i| i.checked);
+        assert!(offered(&h), "a timeline made here shows its bar");
+        assert!(!offered(&h2) && checked(&h2) == Some(false), "hidden by default");
+        h2.frame(|app, ctx| app.command(ctx, &native::timeline_bar::COMMAND.into()).expect("queued"));
+        h2.frame(|_, _| {});
+        assert!(offered(&h2) && checked(&h2) == Some(true), "shown");
+        let mut settings = Settings::default();
+        eframe::App::save(&mut h2.app, &mut settings);
+        assert_eq!(eframe::Storage::get_string(&settings, native::timeline_bar::SETTING).as_deref(), Some("true"));
+        let ctx = egui::Context::default();
+        let mut next = PhotoCraftMobile::create(&ctx, None, Platform::default(), Some(&settings));
+        next.shell(&ctx, &every_feature());
+        next.app.run("file.new", json!({"width": 8, "height": 8})).expect("a document");
+        next.app.run("timeline.create", json!({"duration": 10, "fps": 4.0})).expect("a timeline");
+        assert!(next.panels().iter().any(|p| p.id.as_str() == "timeline"), "the last choice, next launch");
+        h2.frame(|app, ctx| app.command(ctx, &native::timeline_bar::COMMAND.into()).expect("queued"));
+        h2.frame(|_, _| {});
+        assert!(!offered(&h2) && checked(&h2) == Some(false), "hidden again");
     }
 
     /// Pencil's double-tap (`tools.swapColors`) runs with the shell's menus or without.
